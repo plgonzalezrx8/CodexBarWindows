@@ -45,6 +45,7 @@ public partial class App : Application
                 {
                     // ViewModels
                     services.AddSingleton<TrayIconViewModel>();
+                    services.AddTransient<SettingsViewModel>();
 
                     // Core Services
                     services.AddSingleton<SettingsService>();
@@ -55,6 +56,10 @@ public partial class App : Application
 
                     // Providers
                     services.AddTransient<IProviderProbe, CodexProvider>();
+                    services.AddTransient<IProviderProbe, ClaudeProvider>();
+                    services.AddTransient<IProviderProbe, CursorProvider>();
+                    services.AddTransient<IProviderProbe, GeminiProvider>();
+                    services.AddTransient<IProviderProbe, AntigravityProvider>();
 
                     // Background Services
                     services.AddHostedService<RefreshLoopService>();
