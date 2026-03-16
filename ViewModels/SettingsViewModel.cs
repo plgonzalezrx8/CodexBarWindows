@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
+using Microsoft.Win32;
 using CodexBarWindows.Services;
 
 namespace CodexBarWindows.ViewModels;
@@ -278,6 +279,7 @@ public class SettingsViewModel : INotifyPropertyChanged
             _ => 5
         };
         s.RunAtStartup = RunAtStartup;
+        UpdateRegistryStartup(RunAtStartup);
         s.EnableStatusChecks = EnableStatusChecks;
         s.EnableSessionNotifications = EnableSessionNotifications;
         s.ShowCostSummary = ShowCostSummary;
@@ -302,6 +304,33 @@ public class SettingsViewModel : INotifyPropertyChanged
         s.DisableCredentialAccess = DisableCredentialAccess;
 
         _settingsService.SaveSettings();
+    }
+
+    private void UpdateRegistryStartup(bool enable)
+    {
+        try
+        {
+            var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true);
+            if (key == null) return;
+
+            string appName = "CodexBarWindows";
+            if (enable)
+            {
+                var exePath = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
+                if (!string.IsNullOrEmpty(exePath))
+                {
+                    key.SetValue(appName, $"\"{exePath}\"");
+                }
+            }
+            else
+            {
+                key.DeleteValue(appName, false);
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to set startup registry key: {ex.Message}");
+        }
     }
 
     private void ResetDefaults()

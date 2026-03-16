@@ -60,8 +60,17 @@ public partial class App : Application
                     services.AddTransient<IProviderProbe, CursorProvider>();
                     services.AddTransient<IProviderProbe, GeminiProvider>();
                     services.AddTransient<IProviderProbe, AntigravityProvider>();
+                    services.AddTransient<IProviderProbe, CopilotProvider>();
+                    services.AddTransient<IProviderProbe, OpenRouterProvider>();
+                    services.AddTransient<IProviderProbe, KiroProvider>();
+                    services.AddTransient<IProviderProbe, JetBrainsProvider>();
+                    services.AddTransient<IProviderProbe, AugmentProvider>();
 
                     // Background Services
+                    services.AddSingleton<UsageHistoryService>();
+                    services.AddSingleton<GlobalHotkeyService>();
+                    services.AddSingleton<NotificationService>();
+                    services.AddSingleton<UpdateService>();
                     services.AddHostedService<RefreshLoopService>();
                 })
                 .Build();
@@ -70,6 +79,12 @@ public partial class App : Application
 
             // Initialize System Tray Icon
             _taskbarIcon = (TaskbarIcon)FindResource("NotifyIcon");
+
+            // Instantiate initial services
+            _host.Services.GetRequiredService<GlobalHotkeyService>();
+            
+            // Background check for updates
+            _ = _host.Services.GetRequiredService<UpdateService>().CheckForUpdatesAsync();
 
             // Generate a default icon programmatically
             var iconGenerator = _host.Services.GetRequiredService<IconGeneratorService>();

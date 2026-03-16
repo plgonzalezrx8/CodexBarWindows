@@ -123,6 +123,11 @@ public class IconGeneratorService
             "cursor" => (Color.FromArgb(255, 0, 122, 255), Color.FromArgb(255, 0, 60, 130)), // Blue
             "gemini" => (Color.FromArgb(255, 66, 133, 244), Color.FromArgb(255, 234, 67, 53)), // Blue/Red
             "antigravity" => (Color.FromArgb(255, 200, 200, 200), Color.FromArgb(255, 100, 100, 100)), // White/Gray
+            "copilot" => (Color.FromArgb(255, 168, 85, 247), Color.FromArgb(255, 90, 40, 140)), // Purple
+            "openrouter" => (Color.FromArgb(255, 255, 107, 107), Color.FromArgb(255, 180, 50, 50)), // Red/Coral
+            "kiro" => (Color.FromArgb(255, 0, 188, 212), Color.FromArgb(255, 0, 100, 120)), // Cyan
+            "jetbrains" => (Color.FromArgb(255, 255, 87, 34), Color.FromArgb(255, 120, 40, 15)), // Deep Orange
+            "augment" => (Color.FromArgb(255, 76, 175, 80), Color.FromArgb(255, 35, 90, 40)), // Green
             _ => (Color.LightBlue, Color.DarkBlue)
         };
     }
