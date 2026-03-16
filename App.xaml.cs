@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -45,14 +45,21 @@ public partial class App : Application
                 {
                     // ViewModels
                     services.AddSingleton<TrayIconViewModel>();
+                    services.AddTransient<SettingsViewModel>();
 
                     // Core Services
                     services.AddSingleton<SettingsService>();
                     services.AddSingleton<IconGeneratorService>();
                     services.AddSingleton<CliExecutionHelper>();
+                    services.AddSingleton<CredentialManagerService>();
+                    services.AddSingleton<BrowserCookieService>();
 
                     // Providers
                     services.AddTransient<IProviderProbe, CodexProvider>();
+                    services.AddTransient<IProviderProbe, ClaudeProvider>();
+                    services.AddTransient<IProviderProbe, CursorProvider>();
+                    services.AddTransient<IProviderProbe, GeminiProvider>();
+                    services.AddTransient<IProviderProbe, AntigravityProvider>();
 
                     // Background Services
                     services.AddHostedService<RefreshLoopService>();
