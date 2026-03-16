@@ -2,6 +2,8 @@ namespace CodexBarWindows.Models;
 
 public class ProviderUsageStatus
 {
+    public string ProviderId { get; set; } = string.Empty;
+    public string ProviderName { get; set; } = string.Empty;
     public double SessionProgress { get; set; } = 0.0;
     public double WeeklyProgress { get; set; } = 0.0;
     public bool IsError { get; set; } = false;

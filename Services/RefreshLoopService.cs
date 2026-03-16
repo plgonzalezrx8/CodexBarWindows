@@ -47,6 +47,8 @@ public class RefreshLoopService : BackgroundService
 
     private async Task RefreshProvidersAsync(CancellationToken cancellationToken)
     {
+        var statuses = new List<ProviderUsageStatus>();
+
         foreach (var provider in _providers)
         {
             if (_settingsService.CurrentSettings.EnabledProviders.TryGetValue(provider.ProviderId, out bool isEnabled) && isEnabled)
@@ -54,30 +56,52 @@ public class RefreshLoopService : BackgroundService
                 try
                 {
                     var status = await provider.FetchStatusAsync(cancellationToken);
-                    UpdateTrayIcon(status);
+                    statuses.Add(status);
                 }
                 catch (Exception ex)
                 {
                     System.Diagnostics.Debug.WriteLine($"Error fetching {provider.ProviderName}: {ex.Message}");
-                    UpdateTrayIcon(new ProviderUsageStatus { IsError = true, ErrorMessage = ex.Message, TooltipText = $"{provider.ProviderName}: Error" });
+                    statuses.Add(new ProviderUsageStatus { ProviderId = provider.ProviderId, ProviderName = provider.ProviderName, IsError = true, ErrorMessage = ex.Message, TooltipText = $"{provider.ProviderName}: Error" });
                 }
             }
         }
+
+        UpdateTrayIcon(statuses);
     }
 
-    private void UpdateTrayIcon(ProviderUsageStatus status)
+    private void UpdateTrayIcon(List<ProviderUsageStatus> statuses)
     {
         System.Windows.Application.Current.Dispatcher.Invoke(() =>
         {
-            var icon = _iconGenerator.GenerateMeterIcon(status.SessionProgress, status.WeeklyProgress, status.IsError);
+            // Update ViewModel for the popup
+            _trayViewModel.ProviderStatuses.Clear();
+            foreach (var s in statuses)
+            {
+                _trayViewModel.ProviderStatuses.Add(s);
+            }
+
+            // Update Icon
+            var icon = _iconGenerator.GenerateMeterIcon(statuses);
             
-            // In a real app we'd update the specific taskbar icon for this provider, 
-            // but for now we update the main one.
             var taskbarIcon = (Hardcodet.Wpf.TaskbarNotification.TaskbarIcon)System.Windows.Application.Current.FindResource("NotifyIcon");
             if (taskbarIcon != null)
             {
                 taskbarIcon.Icon = icon;
-                _trayViewModel.TooltipText = status.TooltipText;
+                
+                // Construct combined tooltip
+                if (statuses.Count == 0)
+                {
+                    _trayViewModel.TooltipText = "CodexBar (No providers enabled)";
+                }
+                else if (statuses.Count == 1)
+                {
+                    _trayViewModel.TooltipText = statuses[0].TooltipText;
+                }
+                else
+                {
+                    var activeCount = statuses.Count(s => !s.IsError);
+                    _trayViewModel.TooltipText = $"CodexBar ({activeCount} active)";
+                }
             }
         });
     }

@@ -1,7 +1,9 @@
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Input;
+using CodexBarWindows.Models;
 using CodexBarWindows.Views;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -12,6 +14,8 @@ public class TrayIconViewModel : INotifyPropertyChanged
     private readonly IServiceProvider _serviceProvider;
     private string _tooltipText = "CodexBar";
     private SettingsWindow? _settingsWindow;
+
+    public ObservableCollection<ProviderUsageStatus> ProviderStatuses { get; } = new();
 
     public string TooltipText
     {

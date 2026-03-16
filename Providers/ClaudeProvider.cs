@@ -127,6 +127,8 @@ public class ClaudeProvider : IProviderProbe
 
         return new ProviderUsageStatus
         {
+            ProviderId = "claude",
+            ProviderName = "Claude",
             SessionProgress = sessionUsed,
             WeeklyProgress = weeklyUsed,
             IsError = false,
@@ -226,6 +228,8 @@ public class ClaudeProvider : IProviderProbe
 
     private static ProviderUsageStatus MakeError(string message) => new()
     {
+        ProviderId = "claude",
+        ProviderName = "Claude",
         IsError = true,
         ErrorMessage = message,
         TooltipText = $"Claude: {message}"

@@ -73,7 +73,7 @@ public partial class App : Application
 
             // Generate a default icon programmatically
             var iconGenerator = _host.Services.GetRequiredService<IconGeneratorService>();
-            _taskbarIcon.Icon = iconGenerator.GenerateMeterIcon(0.0, 0.0);
+            _taskbarIcon.Icon = iconGenerator.GenerateMeterIcon(new List<ProviderUsageStatus>());
 
             _taskbarIcon.DataContext = _host.Services.GetRequiredService<TrayIconViewModel>();
         }

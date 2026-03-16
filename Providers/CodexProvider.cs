@@ -105,6 +105,8 @@ public class CodexProvider : IProviderProbe
 
         return new ProviderUsageStatus
         {
+            ProviderId = "codex",
+            ProviderName = "Codex",
             SessionProgress = sessionProgress,
             WeeklyProgress = weeklyProgress,
             IsError = false,
@@ -142,6 +144,8 @@ public class CodexProvider : IProviderProbe
 
         return new ProviderUsageStatus
         {
+            ProviderId = "codex",
+            ProviderName = "Codex",
             SessionProgress = sessionProgress,
             WeeklyProgress = weeklyProgress,
             IsError = false,
@@ -153,6 +157,8 @@ public class CodexProvider : IProviderProbe
 
     private static ProviderUsageStatus MakeError(string message) => new()
     {
+        ProviderId = "codex",
+        ProviderName = "Codex",
         IsError = true,
         ErrorMessage = message,
         TooltipText = $"Codex: {message}"

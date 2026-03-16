@@ -151,6 +151,8 @@ public class GeminiProvider : IProviderProbe
 
         return new ProviderUsageStatus
         {
+            ProviderId = "gemini",
+            ProviderName = "Gemini",
             SessionProgress = proUsed / 100.0,
             WeeklyProgress = flashUsed / 100.0,
             IsError = false,
@@ -376,6 +378,8 @@ public class GeminiProvider : IProviderProbe
 
     private static ProviderUsageStatus MakeError(string message) => new()
     {
+        ProviderId = "gemini",
+        ProviderName = "Gemini",
         IsError = true,
         ErrorMessage = message,
         TooltipText = $"Gemini: {message}"
