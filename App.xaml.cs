@@ -90,7 +90,16 @@ public partial class App : Application
             var iconGenerator = _host.Services.GetRequiredService<IconGeneratorService>();
             _taskbarIcon.Icon = iconGenerator.GenerateMeterIcon(new List<ProviderUsageStatus>());
 
-            _taskbarIcon.DataContext = _host.Services.GetRequiredService<TrayIconViewModel>();
+            var trayViewModel = _host.Services.GetRequiredService<TrayIconViewModel>();
+            _taskbarIcon.DataContext = trayViewModel;
+            if (_taskbarIcon.TrayPopup is FrameworkElement trayPopup)
+            {
+                trayPopup.DataContext = trayViewModel;
+            }
+            if (_taskbarIcon.ContextMenu != null)
+            {
+                _taskbarIcon.ContextMenu.DataContext = trayViewModel;
+            }
         }
         catch (Exception ex)
         {

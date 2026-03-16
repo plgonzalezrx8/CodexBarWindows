@@ -176,7 +176,7 @@
         </Grid.ColumnDefinitions>
 
         <!-- ════ SIDEBAR ════════════════════════════ -->
-        <Border Grid.Column="0" Background="{StaticResource PanelBg}"
+        <Border Grid.Column="0" Grid.ColumnSpan="2" Background="{StaticResource PanelBg}"
                 BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,1,0">
             <DockPanel>
                 <!-- App title -->
