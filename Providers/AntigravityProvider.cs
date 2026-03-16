@@ -73,7 +73,7 @@ public class AntigravityProvider : IProviderProbe
 
                 return ParseCommandModelResponse(response);
             }
-            catch (Exception ex2)
+            catch (Exception)
             {
                 return MakeError($"Antigravity API error: {ex1.Message}");
             }
