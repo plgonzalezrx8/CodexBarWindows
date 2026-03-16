@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: ["*"]
+  pull_request:
+
+jobs:
+  lint-build-test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Select Xcode 26.1.1 (if present) or fallback to default
+        run: |
+          set -euo pipefail
+          for candidate in /Applications/Xcode_26.1.1.app /Applications/Xcode_26.1.app /Applications/Xcode.app; do
+            if [[ -d "$candidate" ]]; then
+              sudo xcode-select -s "${candidate}/Contents/Developer"
+              echo "DEVELOPER_DIR=${candidate}/Contents/Developer" >> "$GITHUB_ENV"
+              break
+            fi
+          done
+          /usr/bin/xcodebuild -version
+
+      - name: Swift toolchain version
+        run: |
+          set -euo pipefail
+          swift --version
+          swift package --version
+
+      - name: Install lint tools
+        run: ./Scripts/install_lint_tools.sh
+
+      - name: Lint
+        run: ./Scripts/lint.sh lint
+
+      - name: Swift Test
+        run: swift test --no-parallel
+
+  build-linux-cli:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64
+            runs-on: ubuntu-24.04
+          - name: linux-arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Runner info
+        run: |
+          set -euo pipefail
+          uname -a
+          uname -m
+
+      - name: Setup Swift 6.2.1
+        uses: swift-actions/setup-swift@v3
+        with:
+          swift-version: "6.2.1"
+          skip-verify-signature: true
+
+      - name: Build CodexBarCLI (release, static Swift stdlib)
+        run: swift build -c release --product CodexBarCLI --static-swift-stdlib
+
+      - name: Swift Test (Linux only)
+        run: swift test --parallel
+
+      - name: Smoke test CodexBarCLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN_DIR="$(swift build -c release --product CodexBarCLI --static-swift-stdlib --show-bin-path)"
+          BIN="$BIN_DIR/CodexBarCLI"
+          "$BIN" --help >/dev/null
+          "$BIN" --version >/dev/null
+          if "$BIN" usage --provider codex --web >/dev/null 2>&1; then
+            echo "Expected --web to fail on Linux"
+            exit 1
+          fi
+          "$BIN" usage --provider codex --web 2>&1 | tee /tmp/codexbarcli-stderr.txt >/dev/null || true
+          grep -q "macOS" /tmp/codexbarcli-stderr.txt

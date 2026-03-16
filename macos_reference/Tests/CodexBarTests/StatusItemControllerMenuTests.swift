@@ -1,0 +1,107 @@
+import CodexBarCore
+import Foundation
+import Testing
+@testable import CodexBar
+
+struct StatusItemControllerMenuTests {
+    private func makeSnapshot(primary: RateWindow?, secondary: RateWindow?) -> UsageSnapshot {
+        UsageSnapshot(primary: primary, secondary: secondary, updatedAt: Date())
+    }
+
+    @Test
+    func `cursor switcher falls back to secondary when plan exhausted and showing remaining`() {
+        let primary = RateWindow(usedPercent: 100, windowMinutes: nil, resetsAt: nil, resetDescription: nil)
+        let secondary = RateWindow(usedPercent: 36, windowMinutes: nil, resetsAt: nil, resetDescription: nil)
+        let snapshot = self.makeSnapshot(primary: primary, secondary: secondary)
+
+        let percent = StatusItemController.switcherWeeklyMetricPercent(
+            for: .cursor,
+            snapshot: snapshot,
+            showUsed: false)
+
+        #expect(percent == 64)
+    }
+
+    @Test
+    func `cursor switcher uses primary when showing used`() {
+        let primary = RateWindow(usedPercent: 100, windowMinutes: nil, resetsAt: nil, resetDescription: nil)
+        let secondary = RateWindow(usedPercent: 36, windowMinutes: nil, resetsAt: nil, resetDescription: nil)
+        let snapshot = self.makeSnapshot(primary: primary, secondary: secondary)
+
+        let percent = StatusItemController.switcherWeeklyMetricPercent(
+            for: .cursor,
+            snapshot: snapshot,
+            showUsed: true)
+
+        #expect(percent == 100)
+    }
+
+    @Test
+    func `cursor switcher keeps primary when remaining is positive`() {
+        let primary = RateWindow(usedPercent: 20, windowMinutes: nil, resetsAt: nil, resetDescription: nil)
+        let secondary = RateWindow(usedPercent: 40, windowMinutes: nil, resetsAt: nil, resetDescription: nil)
+        let snapshot = self.makeSnapshot(primary: primary, secondary: secondary)
+
+        let percent = StatusItemController.switcherWeeklyMetricPercent(
+            for: .cursor,
+            snapshot: snapshot,
+            showUsed: false)
+
+        #expect(percent == 80)
+    }
+
+    @Test
+    func `open router brand fallback enabled when no key limit configured`() {
+        let snapshot = OpenRouterUsageSnapshot(
+            totalCredits: 50,
+            totalUsage: 45,
+            balance: 5,
+            usedPercent: 90,
+            keyDataFetched: true,
+            keyLimit: nil,
+            keyUsage: nil,
+            rateLimit: nil,
+            updatedAt: Date()).toUsageSnapshot()
+
+        #expect(StatusItemController.shouldUseOpenRouterBrandFallback(
+            provider: .openrouter,
+            snapshot: snapshot))
+        #expect(MenuBarDisplayText.percentText(window: snapshot.primary, showUsed: false) == nil)
+    }
+
+    @Test
+    func `open router brand fallback disabled when key quota fetch unavailable`() {
+        let snapshot = OpenRouterUsageSnapshot(
+            totalCredits: 50,
+            totalUsage: 45,
+            balance: 5,
+            usedPercent: 90,
+            keyDataFetched: false,
+            keyLimit: nil,
+            keyUsage: nil,
+            rateLimit: nil,
+            updatedAt: Date()).toUsageSnapshot()
+
+        #expect(!StatusItemController.shouldUseOpenRouterBrandFallback(
+            provider: .openrouter,
+            snapshot: snapshot))
+    }
+
+    @Test
+    func `open router brand fallback disabled when key quota available`() {
+        let snapshot = OpenRouterUsageSnapshot(
+            totalCredits: 50,
+            totalUsage: 45,
+            balance: 5,
+            usedPercent: 90,
+            keyLimit: 20,
+            keyUsage: 2,
+            rateLimit: nil,
+            updatedAt: Date()).toUsageSnapshot()
+
+        #expect(!StatusItemController.shouldUseOpenRouterBrandFallback(
+            provider: .openrouter,
+            snapshot: snapshot))
+        #expect(snapshot.primary?.usedPercent == 10)
+    }
+}
