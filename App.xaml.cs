@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -50,6 +50,8 @@ public partial class App : Application
                     services.AddSingleton<SettingsService>();
                     services.AddSingleton<IconGeneratorService>();
                     services.AddSingleton<CliExecutionHelper>();
+                    services.AddSingleton<CredentialManagerService>();
+                    services.AddSingleton<BrowserCookieService>();
 
                     // Providers
                     services.AddTransient<IProviderProbe, CodexProvider>();
