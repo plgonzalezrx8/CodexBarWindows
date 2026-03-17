@@ -2,7 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
-using Microsoft.Win32;
+using CodexBarWindows.Abstractions;
 using CodexBarWindows.Services;
 
 namespace CodexBarWindows.ViewModels;
@@ -14,22 +14,11 @@ namespace CodexBarWindows.ViewModels;
 public class SettingsViewModel : INotifyPropertyChanged
 {
     private readonly SettingsService _settingsService;
+    private readonly IStartupRegistration _startupRegistration;
 
     // ── Provider Definitions ────────────────────────────────────────
     public static readonly (string Id, string Name)[] AllProviders =
-    [
-        ("codex", "Codex"),
-        ("claude", "Claude"),
-        ("cursor", "Cursor"),
-        ("gemini", "Gemini"),
-        ("antigravity", "Antigravity"),
-        ("copilot", "Copilot"),
-        ("openrouter", "OpenRouter"),
-        ("kiro", "Kiro"),
-        ("jetbrains", "JetBrains AI"),
-        ("augment", "Augment"),
-        ("amp", "Amp"),
-    ];
+        ProviderDescriptorRegistry.All.Select(descriptor => (descriptor.Id, descriptor.Name)).ToArray();
 
     public static readonly string[] CookieSourceOptions = ["Auto", "Manual", "Off"];
 
@@ -193,9 +182,10 @@ public class SettingsViewModel : INotifyPropertyChanged
 
     // ── Constructor ─────────────────────────────────────────────────
 
-    public SettingsViewModel(SettingsService settingsService)
+    public SettingsViewModel(SettingsService settingsService, IStartupRegistration startupRegistration)
     {
         _settingsService = settingsService;
+        _startupRegistration = startupRegistration;
         SaveCommand = new RelayCommand(_ => Save());
         ResetDefaultsCommand = new RelayCommand(_ => ResetDefaults());
         LoadFromSettings();
@@ -308,39 +298,13 @@ public class SettingsViewModel : INotifyPropertyChanged
 
     private void UpdateRegistryStartup(bool enable)
     {
-        try
-        {
-            var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true);
-            if (key == null) return;
-
-            string appName = "CodexBarWindows";
-            if (enable)
-            {
-                var exePath = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
-                if (!string.IsNullOrEmpty(exePath))
-                {
-                    key.SetValue(appName, $"\"{exePath}\"");
-                }
-            }
-            else
-            {
-                key.DeleteValue(appName, false);
-            }
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"Failed to set startup registry key: {ex.Message}");
-        }
+        var exePath = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
+        _startupRegistration.SetRunAtStartup(enable, "CodexBarWindows", exePath);
     }
 
     private void ResetDefaults()
     {
-        var fresh = new AppSettings();
-        // Temporarily swap, reload, then swap back
-        var backup = _settingsService.CurrentSettings;
-        typeof(SettingsService)
-            .GetField("_currentSettings", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-            ?.SetValue(_settingsService, fresh);
+        _settingsService.ResetToDefaults();
         LoadFromSettings();
     }
 

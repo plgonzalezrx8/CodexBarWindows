@@ -1,4 +1,5 @@
 using Meziantou.Framework.Win32;
+using CodexBarWindows.Abstractions;
 
 namespace CodexBarWindows.Services;
 
@@ -7,7 +8,7 @@ namespace CodexBarWindows.Services;
 /// OAuth credentials, and cached cookie headers — replacing macOS Keychain.
 /// All credentials are stored per-provider under the "CodexBar:" prefix.
 /// </summary>
-public class CredentialManagerService
+public class CredentialManagerService : ICredentialStore
 {
     private const string CredentialPrefix = "CodexBar:";
 
@@ -142,20 +143,4 @@ public class CredentialManagerService
             ? $"{CredentialPrefix}{providerId}:{accountLabel}"
             : $"{CredentialPrefix}{providerId}";
     }
-}
-
-// ── Supporting models ───────────────────────────────────────────────
-
-public class StoredCredentialInfo
-{
-    public string TargetName { get; set; } = string.Empty;
-    public string? UserName { get; set; }
-    public string? Comment { get; set; }
-}
-
-public class CachedCookieEntry
-{
-    public string CookieHeader { get; set; } = string.Empty;
-    public DateTime StoredAt { get; set; }
-    public string SourceLabel { get; set; } = string.Empty;
 }

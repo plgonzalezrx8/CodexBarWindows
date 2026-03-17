@@ -1,0 +1,33 @@
+{
+  "code": 0,
+  "userStatus": {
+    "email": "dev@example.com",
+    "planStatus": {
+      "planInfo": {
+        "planDisplayName": "Pro"
+      }
+    },
+    "cascadeModelConfigData": {
+      "clientModelConfigs": [
+        {
+          "label": "Claude 3.7 Sonnet",
+          "modelOrAlias": {
+            "model": "claude-3.7-sonnet"
+          },
+          "quotaInfo": {
+            "remainingFraction": 0.40
+          }
+        },
+        {
+          "label": "Pro Fast",
+          "modelOrAlias": {
+            "model": "pro-fast"
+          },
+          "quotaInfo": {
+            "remainingFraction": 0.75
+          }
+        }
+      ]
+    }
+  }
+}
