@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Globalization;
 using CodexBarWindows.Providers;
 using CodexBarWindows.Services;
 
@@ -61,6 +62,36 @@ public class ProviderParsingTests
     }
 
     [Fact]
+    public void Kiro_output_parses_decimal_values_with_invariant_culture()
+    {
+        var previousCulture = CultureInfo.CurrentCulture;
+        var previousUiCulture = CultureInfo.CurrentUICulture;
+
+        try
+        {
+            CultureInfo.CurrentCulture = new CultureInfo("de-DE");
+            CultureInfo.CurrentUICulture = new CultureInfo("de-DE");
+
+            var output = """
+                Plan: KIRO PRO
+                █████ 65%
+                (32.5 of 50 covered in plan)
+                """;
+
+            var status = KiroProvider.ParseUsageOutput(output);
+
+            Assert.False(status.IsError);
+            Assert.Contains("Credits:", status.TooltipText);
+            Assert.Equal(0.65, status.SessionProgress, 3);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previousCulture;
+            CultureInfo.CurrentUICulture = previousUiCulture;
+        }
+    }
+
+    [Fact]
     public void OpenRouter_response_parses_usage()
     {
         var json = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "TestData", "openrouter-auth-key.json"));
@@ -79,5 +110,59 @@ public class ProviderParsingTests
         Assert.False(status.IsError);
         Assert.Contains("Rider", status.TooltipText);
         Assert.Equal(0.25, status.SessionProgress, 3);
+    }
+
+    [Fact]
+    public async Task JetBrains_provider_selects_highest_semantic_version()
+    {
+        using var paths = new TestAppDataPaths();
+        var settings = new SettingsService(paths);
+        settings.CurrentSettings.EnabledProviders["jetbrains"] = true;
+        var env = new FakeEnvironmentService();
+        var appData = Path.Combine(paths.AppDataDirectory, "appdata");
+        env.Folders[Environment.SpecialFolder.ApplicationData] = appData;
+        Directory.CreateDirectory(Path.Combine(appData, "JetBrains", "Rider2024.9", "options"));
+        Directory.CreateDirectory(Path.Combine(appData, "JetBrains", "Rider2024.10", "options"));
+
+        await File.WriteAllTextAsync(
+            Path.Combine(appData, "JetBrains", "Rider2024.9", "options", "other.xml"),
+            """<application><component name="AIAssistantQuotaManager2"><option name="quotaInfo" value="{&quot;type&quot;:&quot;trial&quot;,&quot;current&quot;:&quot;9&quot;,&quot;maximum&quot;:&quot;100&quot;}" /></component></application>""");
+        await File.WriteAllTextAsync(
+            Path.Combine(appData, "JetBrains", "Rider2024.10", "options", "other.xml"),
+            """<application><component name="AIAssistantQuotaManager2"><option name="quotaInfo" value="{&quot;type&quot;:&quot;trial&quot;,&quot;current&quot;:&quot;10&quot;,&quot;maximum&quot;:&quot;100&quot;}" /></component></application>""");
+
+        var provider = new JetBrainsProvider(settings, env);
+
+        var status = await provider.FetchStatusAsync(CancellationToken.None);
+
+        Assert.False(status.IsError);
+        Assert.Contains("10/100", status.TooltipText);
+    }
+
+    [Fact]
+    public async Task JetBrains_provider_prefers_multi_part_version_over_lexicographically_larger_string()
+    {
+        using var paths = new TestAppDataPaths();
+        var settings = new SettingsService(paths);
+        settings.CurrentSettings.EnabledProviders["jetbrains"] = true;
+        var env = new FakeEnvironmentService();
+        var appData = Path.Combine(paths.AppDataDirectory, "appdata");
+        env.Folders[Environment.SpecialFolder.ApplicationData] = appData;
+        Directory.CreateDirectory(Path.Combine(appData, "JetBrains", "Rider2024.2.9", "options"));
+        Directory.CreateDirectory(Path.Combine(appData, "JetBrains", "Rider2024.10.1", "options"));
+
+        await File.WriteAllTextAsync(
+            Path.Combine(appData, "JetBrains", "Rider2024.2.9", "options", "other.xml"),
+            """<application><component name="AIAssistantQuotaManager2"><option name="quotaInfo" value="{&quot;type&quot;:&quot;trial&quot;,&quot;current&quot;:&quot;9&quot;,&quot;maximum&quot;:&quot;100&quot;}" /></component></application>""");
+        await File.WriteAllTextAsync(
+            Path.Combine(appData, "JetBrains", "Rider2024.10.1", "options", "other.xml"),
+            """<application><component name="AIAssistantQuotaManager2"><option name="quotaInfo" value="{&quot;type&quot;:&quot;trial&quot;,&quot;current&quot;:&quot;10&quot;,&quot;maximum&quot;:&quot;100&quot;}" /></component></application>""");
+
+        var provider = new JetBrainsProvider(settings, env);
+
+        var status = await provider.FetchStatusAsync(CancellationToken.None);
+
+        Assert.False(status.IsError);
+        Assert.Contains("10/100", status.TooltipText);
     }
 }

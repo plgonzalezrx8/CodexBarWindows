@@ -62,7 +62,7 @@ public class AugmentProvider : IProviderProbe
                 var result = await FetchWithCookies(cookieHeader, ct);
 
                 // Cache on success
-                _credentialStore.CacheCookieHeader("augment", cookieHeader, "Browser Import");
+                _credentialStore.CacheCookieHeader("augment", cookieHeader, "browser-auto");
                 return result;
             }
         }

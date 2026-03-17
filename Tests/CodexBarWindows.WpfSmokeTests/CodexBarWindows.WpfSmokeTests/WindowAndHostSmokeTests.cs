@@ -23,6 +23,26 @@ public class WindowAndHostSmokeTests
     }
 
     [Fact]
+    public async Task Closing_settings_window_does_not_save_pending_changes()
+    {
+        await StaTestRunner.RunAsync(() =>
+        {
+            StaTestRunner.EnsureApplication();
+            using var paths = new TestAppDataPaths();
+            var settings = new CodexBarWindows.Services.SettingsService(paths);
+            var viewModel = new SettingsViewModel(settings, new FakeStartupRegistration())
+            {
+                GlobalShortcut = "Ctrl+Shift+C"
+            };
+            var window = new SettingsWindow(viewModel);
+
+            window.Close();
+
+            Assert.Equal(string.Empty, settings.CurrentSettings.GlobalShortcut);
+        });
+    }
+
+    [Fact]
     public async Task Tray_icon_command_opens_settings_window()
     {
         await StaTestRunner.RunAsync(() =>
@@ -38,12 +58,43 @@ public class WindowAndHostSmokeTests
             var tray = new TrayIconViewModel(services);
             tray.ShowSettingsCommand.Execute(null);
 
-            Assert.Single(Application.Current.Windows.OfType<SettingsWindow>());
-            foreach (Window window in Application.Current.Windows)
-            {
-                window.Close();
-            }
+            var window = GetSettingsWindow(tray);
+            Assert.NotNull(window);
+            window!.Close();
         });
+    }
+
+    [Fact]
+    public async Task Tray_icon_command_keeps_a_settings_window_available_after_reopen()
+    {
+        await StaTestRunner.RunAsync(() =>
+        {
+            StaTestRunner.EnsureApplication();
+            using var paths = new TestAppDataPaths();
+            var services = new ServiceCollection()
+                .AddSingleton(new CodexBarWindows.Services.SettingsService(paths))
+                .AddSingleton<CodexBarWindows.Abstractions.IStartupRegistration>(new FakeStartupRegistration())
+                .AddTransient<SettingsViewModel>()
+                .BuildServiceProvider();
+
+            var tray = new TrayIconViewModel(services);
+            tray.ShowSettingsCommand.Execute(null);
+            var firstWindow = GetSettingsWindow(tray)!;
+            firstWindow.WindowState = WindowState.Minimized;
+
+            tray.ShowSettingsCommand.Execute(null);
+
+            var reopenedWindow = GetSettingsWindow(tray);
+            Assert.NotNull(reopenedWindow);
+            Assert.Equal(WindowState.Normal, reopenedWindow!.WindowState);
+            reopenedWindow.Close();
+        });
+    }
+
+    private static SettingsWindow? GetSettingsWindow(TrayIconViewModel tray)
+    {
+        var field = typeof(TrayIconViewModel).GetField("_settingsWindow", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        return (SettingsWindow?)field?.GetValue(tray);
     }
 
     [Fact]

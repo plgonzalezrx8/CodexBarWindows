@@ -119,13 +119,21 @@ public class CursorProvider : IProviderProbe
         var planUsedUsd = planUsedRaw / 100.0;
         var planLimitUsd = planLimitRaw / 100.0;
 
-        double planPercentUsed = planLimitRaw > 0
-            ? (planUsedRaw / planLimitRaw) * 100
-            : summary.IndividualUsage?.Plan?.TotalPercentUsed ?? 0;
+        double planPercentUsed;
+        if (planLimitRaw > 0)
+        {
+            planPercentUsed = (planUsedRaw / planLimitRaw) * 100;
+        }
+        else
+        {
+            planPercentUsed = summary.IndividualUsage?.Plan?.TotalPercentUsed ?? 0;
 
-        // Normalize percent if API returns 0-1 range
-        if (planPercentUsed is > 0 and <= 1)
-            planPercentUsed *= 100;
+            // Normalize percent if the fallback API returns a 0-1 fraction.
+            if (planPercentUsed is > 0 and <= 1)
+            {
+                planPercentUsed *= 100;
+            }
+        }
 
         var onDemandUsedUsd = (summary.IndividualUsage?.OnDemand?.Used ?? 0) / 100.0;
         var onDemandLimitUsd = summary.IndividualUsage?.OnDemand?.Limit is int odLimit ? odLimit / 100.0 : (double?)null;
@@ -135,7 +143,7 @@ public class CursorProvider : IProviderProbe
         tooltipParts.Add($"Plan: {planPercentUsed:F1}% used (${planUsedUsd:F2} / ${planLimitUsd:F2})");
         if (onDemandUsedUsd > 0)
             tooltipParts.Add($"On-demand: ${onDemandUsedUsd:F2}" + (onDemandLimitUsd.HasValue ? $" / ${onDemandLimitUsd:F2}" : ""));
-        if (summary.MembershipType != null)
+        if (!string.IsNullOrEmpty(summary.MembershipType))
             tooltipParts.Add($"Plan: Cursor {char.ToUpper(summary.MembershipType[0])}{summary.MembershipType[1..]}");
         if (userInfo?.Email != null)
             tooltipParts.Add($"Account: {userInfo.Email}");

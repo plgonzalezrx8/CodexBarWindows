@@ -1,6 +1,5 @@
 using System.IO;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using System.Xml;
 using CodexBarWindows.Abstractions;
 using CodexBarWindows.Models;
@@ -78,7 +77,7 @@ public class JetBrainsProvider : IProviderProbe
             return null;
 
         JetBrainsIDE? latest = null;
-        string? latestVersion = null;
+        int[]? latestVersion = null;
 
         foreach (var dir in Directory.GetDirectories(jetbrainsDir))
         {
@@ -94,15 +93,41 @@ public class JetBrainsProvider : IProviderProbe
                 var quotaFile = Path.Combine(dir, "options", "other.xml");
                 if (!File.Exists(quotaFile)) continue;
 
-                if (latestVersion == null || string.Compare(version, latestVersion, StringComparison.Ordinal) > 0)
+                var parsedVersion = ParseVersionParts(version);
+                if (latestVersion == null || CompareVersionParts(parsedVersion, latestVersion) > 0)
                 {
                     latest = new JetBrainsIDE(code, name, dir);
-                    latestVersion = version;
+                    latestVersion = parsedVersion;
                 }
             }
         }
 
         return latest;
+    }
+
+    private static int[] ParseVersionParts(string version)
+    {
+        return version
+            .Split(['.', '-'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => int.TryParse(part, out var value) ? value : 0)
+            .ToArray();
+    }
+
+    private static int CompareVersionParts(int[] left, int[] right)
+    {
+        var maxLength = Math.Max(left.Length, right.Length);
+        for (var index = 0; index < maxLength; index++)
+        {
+            var leftPart = index < left.Length ? left[index] : 0;
+            var rightPart = index < right.Length ? right[index] : 0;
+            var comparison = leftPart.CompareTo(rightPart);
+            if (comparison != 0)
+            {
+                return comparison;
+            }
+        }
+
+        return 0;
     }
 
     // ── XML Parsing ─────────────────────────────────────────────────

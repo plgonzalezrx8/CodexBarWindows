@@ -1,11 +1,15 @@
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Runtime.InteropServices;
 using CodexBarWindows.Models;
 
 namespace CodexBarWindows.Services;
 
 public class IconGeneratorService
 {
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool DestroyIcon(nint hIcon);
+
     private readonly SettingsService _settingsService;
 
     public IconGeneratorService(SettingsService settingsService)
@@ -135,6 +139,14 @@ public class IconGeneratorService
     private Icon ConvertToIcon(Bitmap bitmap)
     {
         nint hIcon = bitmap.GetHicon();
-        return Icon.FromHandle(hIcon);
+        try
+        {
+            using var tempIcon = Icon.FromHandle(hIcon);
+            return (Icon)tempIcon.Clone();
+        }
+        finally
+        {
+            DestroyIcon(hIcon);
+        }
     }
 }

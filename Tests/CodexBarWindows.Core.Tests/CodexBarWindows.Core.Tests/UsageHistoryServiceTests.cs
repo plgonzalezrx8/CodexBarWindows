@@ -25,4 +25,32 @@ public class UsageHistoryServiceTests
         Assert.True(reloaded.History[dayKey].ContainsKey("codex"));
         Assert.False(reloaded.History[dayKey].ContainsKey("claude"));
     }
+
+    [Fact]
+    public void Does_not_write_history_when_all_statuses_are_errors()
+    {
+        using var paths = new TestAppDataPaths();
+        var service = new UsageHistoryService(paths, new FakeClock());
+
+        service.RecordSnapshot(
+        [
+            new ProviderUsageStatus { ProviderId = "codex", ProviderName = "Codex", IsError = true }
+        ]);
+
+        Assert.False(File.Exists(paths.HistoryFilePath));
+        Assert.Single(service.History);
+        Assert.Empty(service.History.Values.Single());
+    }
+
+    [Fact]
+    public void Handles_invalid_history_file_by_starting_fresh()
+    {
+        using var paths = new TestAppDataPaths();
+        Directory.CreateDirectory(paths.AppDataDirectory);
+        File.WriteAllText(paths.HistoryFilePath, "{not json");
+
+        var service = new UsageHistoryService(paths, new FakeClock());
+
+        Assert.Empty(service.History);
+    }
 }
