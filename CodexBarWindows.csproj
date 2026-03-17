@@ -10,6 +10,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="CodexBarWindows.Core\**\*.cs" />
+    <Compile Remove="Tests\**\*.cs" />
+    <EmbeddedResource Remove="Tests\**\*" />
+    <None Remove="Tests\**\*" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Hardcodet.NotifyIcon.Wpf" Version="2.0.1" />
     <PackageReference Include="Meziantou.Framework.Win32.CredentialManager" Version="1.7.17" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.5" />
@@ -20,6 +27,10 @@
     <PackageReference Include="System.Drawing.Common" Version="10.0.5" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.5" />
     <PackageReference Include="System.Text.Json" Version="10.0.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="CodexBarWindows.Core\CodexBarWindows.Core\CodexBarWindows.Core.csproj" />
   </ItemGroup>
 
 </Project>

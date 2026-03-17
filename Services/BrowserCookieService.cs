@@ -2,6 +2,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using CodexBarWindows.Abstractions;
 using Microsoft.Data.Sqlite;
 
 namespace CodexBarWindows.Services;
@@ -13,7 +14,7 @@ namespace CodexBarWindows.Services;
 ///
 /// Also supports reading Firefox cookies (unencrypted SQLite).
 /// </summary>
-public class BrowserCookieService
+public class BrowserCookieService : IBrowserCookieSource
 {
     // ── Browser Definitions ─────────────────────────────────────────
 
@@ -35,6 +36,11 @@ public class BrowserCookieService
     /// browser in the import order.  Returns the combined "Cookie" header
     /// value, or null if no cookies were found.
     /// </summary>
+    public string? GetCookieHeader(string domain)
+    {
+        return GetCookieHeader(domain, null);
+    }
+
     public string? GetCookieHeader(string domain, IEnumerable<Browser>? browserOrder = null)
     {
         foreach (var browser in browserOrder ?? DefaultBrowserOrder)

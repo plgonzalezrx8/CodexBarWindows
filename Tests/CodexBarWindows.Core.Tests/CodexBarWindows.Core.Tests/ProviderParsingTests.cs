@@ -1,0 +1,83 @@
+using System.Text.Json;
+using CodexBarWindows.Providers;
+using CodexBarWindows.Services;
+
+namespace CodexBarWindows.Core.Tests;
+
+public class ProviderParsingTests
+{
+    [Fact]
+    public void Provider_registry_is_deterministic_and_unique()
+    {
+        var ids = ProviderDescriptorRegistry.All.Select(descriptor => descriptor.Id).ToList();
+
+        Assert.NotEmpty(ids);
+        Assert.Equal(ids.Count, ids.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.Equal(ids, ProviderDescriptorRegistry.All.Select(descriptor => descriptor.Id).ToList());
+    }
+
+    [Fact]
+    public void Codex_usage_snapshot_maps_to_status()
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "TestData", "codex-usage.json")));
+        var usage = CodexProvider.ParseUsageSnapshot(doc.RootElement);
+        var status = CodexProvider.CreateStatus(usage);
+
+        Assert.False(status.IsError);
+        Assert.Equal("codex", status.ProviderId);
+        Assert.Equal(0.42, status.SessionProgress, 3);
+        Assert.Contains("Credits: 12.50", status.TooltipText);
+    }
+
+    [Fact]
+    public void Claude_cookie_helpers_extract_session_key()
+    {
+        var normalized = ClaudeProvider.NormalizeCookieHeader("foo=bar; sessionKey=abc123; another=value");
+
+        Assert.Equal("sessionKey=abc123", normalized);
+        Assert.Equal("abc123", ClaudeProvider.ExtractSessionKey(normalized));
+    }
+
+    [Fact]
+    public void Antigravity_response_parses_usage()
+    {
+        var json = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "TestData", "antigravity-user-status.json"));
+        var status = AntigravityProvider.ParseUserStatusResponse(json);
+
+        Assert.False(status.IsError);
+        Assert.Contains("Plan: Pro", status.TooltipText);
+        Assert.True(status.SessionProgress > 0.5);
+    }
+
+    [Fact]
+    public void Kiro_output_parses_usage()
+    {
+        var text = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "TestData", "kiro-usage.txt"));
+        var status = KiroProvider.ParseUsageOutput(text);
+
+        Assert.False(status.IsError);
+        Assert.Contains("KIRO PRO", status.TooltipText);
+        Assert.True(status.SessionProgress > 0.6);
+    }
+
+    [Fact]
+    public void OpenRouter_response_parses_usage()
+    {
+        var json = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "TestData", "openrouter-auth-key.json"));
+        var status = OpenRouterProvider.ParseResponse(json);
+
+        Assert.False(status.IsError);
+        Assert.Contains("primary-key", status.TooltipText);
+        Assert.Equal(12.34 / 40.0, status.SessionProgress, 3);
+    }
+
+    [Fact]
+    public void JetBrains_quota_json_parses_usage()
+    {
+        var status = JetBrainsProvider.ParseQuotaJson("{\"type\":\"trial\",\"current\":\"25\",\"maximum\":\"100\"}", null, "Rider");
+
+        Assert.False(status.IsError);
+        Assert.Contains("Rider", status.TooltipText);
+        Assert.Equal(0.25, status.SessionProgress, 3);
+    }
+}
