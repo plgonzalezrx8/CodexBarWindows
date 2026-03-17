@@ -12,6 +12,7 @@ public class RefreshLoopService : BackgroundService
     private readonly IconGeneratorService _iconGenerator;
     private readonly UsageHistoryService _historyService;
     private readonly NotificationService _notificationService;
+    private TaskCompletionSource<bool> _settingsChangedSignal = CreateSettingsChangedSignal();
 
     public RefreshLoopService(
         IEnumerable<IProviderProbe> providers, 
@@ -27,6 +28,7 @@ public class RefreshLoopService : BackgroundService
         _iconGenerator = iconGenerator;
         _historyService = historyService;
         _notificationService = notificationService;
+        _settingsService.SettingsChanged += OnSettingsChanged;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -37,19 +39,65 @@ public class RefreshLoopService : BackgroundService
         while (!stoppingToken.IsCancellationRequested)
         {
             await RefreshProvidersAsync(stoppingToken);
-            
-            var interval = TimeSpan.FromMinutes(_settingsService.CurrentSettings.RefreshIntervalMinutes);
-            
-            try
-            {
-                await Task.Delay(interval, stoppingToken);
-            }
-            catch (TaskCanceledException)
+
+            if (!await WaitForNextRefreshAsync(stoppingToken))
             {
                 break;
             }
         }
     }
+
+    private async Task<bool> WaitForNextRefreshAsync(CancellationToken stoppingToken)
+    {
+        var intervalMinutes = _settingsService.CurrentSettings.RefreshIntervalMinutes;
+        if (intervalMinutes <= 0)
+        {
+            // Manual mode: pause the loop until settings change
+            try
+            {
+                await WaitForSettingsChangeAsync(stoppingToken);
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                return false;
+            }
+        }
+
+        var delayTask = Task.Delay(TimeSpan.FromMinutes(intervalMinutes), stoppingToken);
+        var settingsChangedTask = WaitForSettingsChangeAsync(stoppingToken);
+
+        try
+        {
+            await Task.WhenAny(delayTask, settingsChangedTask);
+            return !stoppingToken.IsCancellationRequested;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+    }
+
+    private Task WaitForSettingsChangeAsync(CancellationToken stoppingToken)
+    {
+        var signal = _settingsChangedSignal.Task;
+        return signal.WaitAsync(stoppingToken);
+    }
+
+    private void OnSettingsChanged()
+    {
+        var completedSignal = Interlocked.Exchange(ref _settingsChangedSignal, CreateSettingsChangedSignal());
+        completedSignal.TrySetResult(true);
+    }
+
+    public override void Dispose()
+    {
+        _settingsService.SettingsChanged -= OnSettingsChanged;
+        base.Dispose();
+    }
+
+    private static TaskCompletionSource<bool> CreateSettingsChangedSignal()
+        => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private readonly Dictionary<string, int> _consecutiveFailures = new();
     private readonly Dictionary<string, int> _skipCycles = new();

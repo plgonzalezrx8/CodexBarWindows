@@ -92,11 +92,11 @@ public class CredentialManagerService
     /// <summary>Stores a cached cookie header for the provider.</summary>
     public void CacheCookieHeader(string providerId, string cookieHeader, string sourceLabel)
     {
-        // Store the cookie value
-        SaveCredential(providerId + ":cookie", cookieHeader, sourceLabel);
+        // Store the cookie value (no accountLabel so the key stays consistent with read/delete)
+        SaveCredential(providerId + ":cookie", cookieHeader);
         // Store metadata (timestamp + source) as a separate credential
         var meta = $"{DateTime.UtcNow:O}|{sourceLabel}";
-        SaveCredential(providerId + ":cookie-meta", meta, sourceLabel);
+        SaveCredential(providerId + ":cookie-meta", meta);
     }
 
     /// <summary>Retrieves a cached cookie header, or null if not present.</summary>
