@@ -131,14 +131,37 @@ public class CliExecutionHelper
         }
 
         var pathValue = Environment.GetEnvironmentVariable("PATH");
-        if (string.IsNullOrWhiteSpace(pathValue))
-        {
-            return command;
-        }
-
         var candidateExtensions = new[] { ".exe", ".cmd", ".bat", ".com", ".ps1" };
 
-        foreach (var pathEntry in pathValue.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        var searchDirectories = new List<string>();
+        if (!string.IsNullOrWhiteSpace(pathValue))
+        {
+            searchDirectories.AddRange(pathValue.Split(
+                Path.PathSeparator,
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        }
+
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var roamingAppData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+        if (!string.IsNullOrWhiteSpace(userProfile))
+        {
+            searchDirectories.Add(Path.Combine(userProfile, ".local", "bin"));
+            searchDirectories.Add(Path.Combine(userProfile, ".dotnet", "tools"));
+        }
+
+        if (!string.IsNullOrWhiteSpace(roamingAppData))
+        {
+            searchDirectories.Add(Path.Combine(roamingAppData, "npm"));
+        }
+
+        if (!string.IsNullOrWhiteSpace(localAppData))
+        {
+            searchDirectories.Add(Path.Combine(localAppData, "Microsoft", "WindowsApps"));
+        }
+
+        foreach (var pathEntry in searchDirectories.Where(Directory.Exists).Distinct(StringComparer.OrdinalIgnoreCase))
         {
             foreach (var extension in candidateExtensions)
             {
