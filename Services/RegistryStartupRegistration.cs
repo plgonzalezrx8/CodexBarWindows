@@ -21,7 +21,10 @@ public sealed class RegistryStartupRegistration : IStartupRegistration
                 return;
             }
 
-            key.DeleteValue(appName, false);
+            if (!enable)
+            {
+                key.DeleteValue(appName, false);
+            }
         }
         catch (Exception ex)
         {
