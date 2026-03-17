@@ -304,8 +304,60 @@ public class SettingsViewModel : INotifyPropertyChanged
 
     private void ResetDefaults()
     {
-        _settingsService.ResetToDefaults();
-        LoadFromSettings();
+        // Load default values into the view-model only; the live
+        // SettingsService is left untouched until the user clicks Save.
+        LoadFromDefaults(new AppSettings());
+    }
+
+    private void LoadFromDefaults(AppSettings s)
+    {
+        // Providers
+        Providers.Clear();
+        foreach (var (id, name) in AllProviders)
+        {
+            var isEnabled = s.EnabledProviders.GetValueOrDefault(id, false);
+            var cookieSource = s.ProviderCookieSources.GetValueOrDefault(id, "auto");
+            Providers.Add(new ProviderSettingsItem
+            {
+                ProviderId = id,
+                ProviderName = name,
+                IsEnabled = isEnabled,
+                CookieSourceIndex = Array.IndexOf(CookieSourceOptions, cookieSource.Capitalize()) is >= 0 and var idx ? idx : 0
+            });
+        }
+
+        // General
+        RefreshIntervalIndex = s.RefreshIntervalMinutes switch
+        {
+            0 => 0,
+            1 => 1,
+            2 => 2,
+            5 => 3,
+            15 => 4,
+            _ => 3
+        };
+        RunAtStartup = s.RunAtStartup;
+        EnableStatusChecks = s.EnableStatusChecks;
+        EnableSessionNotifications = s.EnableSessionNotifications;
+        ShowCostSummary = s.ShowCostSummary;
+
+        // Display
+        MergeIcons = s.MergeIcons;
+        SwitcherShowsIcons = s.SwitcherShowsIcons;
+        ShowMostUsedProvider = s.ShowMostUsedProvider;
+        MenuBarShowsPercent = s.MenuBarShowsPercent;
+        DisplayModeIndex = Array.IndexOf(DisplayModeOptions, s.DisplayMode) is >= 0 and var di ? di : 0;
+        ShowUsageAsUsed = s.ShowUsageAsUsed;
+        ShowResetTimeAsClock = s.ShowResetTimeAsClock;
+        ShowCredits = s.ShowCredits;
+        ShowAllTokenAccounts = s.ShowAllTokenAccounts;
+
+        // Advanced
+        GlobalShortcut = s.GlobalShortcut;
+        ShowDebugSettings = s.ShowDebugSettings;
+        SurpriseMe = s.SurpriseMe;
+        HidePersonalInfo = s.HidePersonalInfo;
+        DisableCredentialAccess = s.DisableCredentialAccess;
     }
 
     // ── INotifyPropertyChanged ──────────────────────────────────────

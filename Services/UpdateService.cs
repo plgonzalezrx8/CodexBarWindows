@@ -31,7 +31,10 @@ public class UpdateService
             var currentVersionNum = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.0";
             var currentVersion = "v" + currentVersionNum;
 
-            if (tagName != null && string.Compare(tagName, currentVersion, StringComparison.OrdinalIgnoreCase) > 0)
+            if (tagName != null
+                && Version.TryParse(tagName.TrimStart('v', 'V'), out var remoteVersion)
+                && Version.TryParse(currentVersionNum, out var localVersion)
+                && remoteVersion > localVersion)
             {
                 new ToastContentBuilder()
                     .AddArgument("action", "update")

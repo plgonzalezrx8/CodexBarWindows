@@ -11,6 +11,7 @@ namespace CodexBarWindows.Services;
 public class CredentialManagerService : ICredentialStore
 {
     private const string CredentialPrefix = "CodexBar:";
+    private const string DefaultCookieSourceLabel = "browser-auto";
 
     // ── Store / Update ──────────────────────────────────────────────
 
@@ -93,21 +94,23 @@ public class CredentialManagerService : ICredentialStore
     /// <summary>Stores a cached cookie header for the provider.</summary>
     public void CacheCookieHeader(string providerId, string cookieHeader, string sourceLabel)
     {
+        var normalizedSourceLabel = string.IsNullOrWhiteSpace(sourceLabel)
+            ? DefaultCookieSourceLabel
+            : sourceLabel;
+
         // Store the cookie value
-        SaveCredential(providerId + ":cookie", cookieHeader, sourceLabel);
+        SaveCredential(providerId + ":cookie", cookieHeader, normalizedSourceLabel);
         // Store metadata (timestamp + source) as a separate credential
-        var meta = $"{DateTime.UtcNow:O}|{sourceLabel}";
-        SaveCredential(providerId + ":cookie-meta", meta, sourceLabel);
+        var meta = $"{DateTime.UtcNow:O}|{normalizedSourceLabel}";
+        SaveCredential(providerId + ":cookie-meta", meta, normalizedSourceLabel);
     }
 
     /// <summary>Retrieves a cached cookie header, or null if not present.</summary>
     public CachedCookieEntry? GetCachedCookieHeader(string providerId)
     {
-        var cookie = GetCredential(providerId + ":cookie");
-        if (string.IsNullOrEmpty(cookie)) return null;
-
-        var meta = GetCredential(providerId + ":cookie-meta");
-        var sourceLabel = "unknown";
+        var sourceLabel = DefaultCookieSourceLabel;
+        var meta = GetCredential(providerId + ":cookie-meta", sourceLabel)
+            ?? GetCredential(providerId + ":cookie-meta");
         DateTime storedAt = DateTime.MinValue;
 
         if (!string.IsNullOrEmpty(meta))
@@ -120,6 +123,10 @@ public class CredentialManagerService : ICredentialStore
             }
         }
 
+        var cookie = GetCredential(providerId + ":cookie", sourceLabel)
+            ?? GetCredential(providerId + ":cookie");
+        if (string.IsNullOrEmpty(cookie)) return null;
+
         return new CachedCookieEntry
         {
             CookieHeader = cookie,
@@ -131,6 +138,8 @@ public class CredentialManagerService : ICredentialStore
     /// <summary>Clears a cached cookie header for the provider.</summary>
     public void ClearCachedCookieHeader(string providerId)
     {
+        DeleteCredential(providerId + ":cookie", DefaultCookieSourceLabel);
+        DeleteCredential(providerId + ":cookie-meta", DefaultCookieSourceLabel);
         DeleteCredential(providerId + ":cookie");
         DeleteCredential(providerId + ":cookie-meta");
     }
