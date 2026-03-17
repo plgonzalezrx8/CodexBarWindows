@@ -33,7 +33,9 @@ public sealed class TaskbarTrayPresenter : ITrayPresenter
                 return;
             }
 
+            var previousIcon = taskbarIcon.Icon;
             taskbarIcon.Icon = _iconGenerator.GenerateMeterIcon(result.Statuses);
+            previousIcon?.Dispose();
         });
     }
 }

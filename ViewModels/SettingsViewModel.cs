@@ -201,7 +201,7 @@ public class SettingsViewModel : INotifyPropertyChanged
         Providers.Clear();
         foreach (var (id, name) in AllProviders)
         {
-            var isEnabled = s.EnabledProviders.GetValueOrDefault(id, false);
+            var isEnabled = GetDefaultEnabled(id, s);
             var cookieSource = s.ProviderCookieSources.GetValueOrDefault(id, "auto");
             Providers.Add(new ProviderSettingsItem
             {
@@ -315,7 +315,7 @@ public class SettingsViewModel : INotifyPropertyChanged
         Providers.Clear();
         foreach (var (id, name) in AllProviders)
         {
-            var isEnabled = s.EnabledProviders.GetValueOrDefault(id, false);
+            var isEnabled = GetDefaultEnabled(id, s);
             var cookieSource = s.ProviderCookieSources.GetValueOrDefault(id, "auto");
             Providers.Add(new ProviderSettingsItem
             {
@@ -358,6 +358,16 @@ public class SettingsViewModel : INotifyPropertyChanged
         SurpriseMe = s.SurpriseMe;
         HidePersonalInfo = s.HidePersonalInfo;
         DisableCredentialAccess = s.DisableCredentialAccess;
+    }
+
+    private static bool GetDefaultEnabled(string providerId, AppSettings settings)
+    {
+        if (settings.EnabledProviders.TryGetValue(providerId, out var isEnabled))
+        {
+            return isEnabled;
+        }
+
+        return ProviderDescriptorRegistry.All.First(descriptor => descriptor.Id == providerId).EnabledByDefault;
     }
 
     // ── INotifyPropertyChanged ──────────────────────────────────────

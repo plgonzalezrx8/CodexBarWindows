@@ -180,4 +180,39 @@ public class ProviderFlowTests
         Assert.True(status.IsError);
         Assert.Contains("Log in", status.TooltipText);
     }
+
+    [Fact]
+    public async Task Cursor_provider_handles_empty_membership_type_without_throwing()
+    {
+        using var paths = new TestAppDataPaths();
+        var settings = new SettingsService(paths);
+        var cookies = new FakeCookieSource { CookieHeader = "WorkosCursorSessionToken=test" };
+        var credentials = new FakeCredentialStore();
+        var client = new HttpClient(new StubHttpMessageHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            return path switch
+            {
+                "/api/usage-summary" => new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("""{"billingCycleEnd":"2026-03-31","membershipType":"","individualUsage":{"plan":{"used":500,"limit":1000}}}""", Encoding.UTF8, "application/json")
+                },
+                "/api/auth/me" => new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("""{"email":"cursor@example.com"}""", Encoding.UTF8, "application/json")
+                },
+                _ => new HttpResponseMessage(HttpStatusCode.NotFound)
+            };
+        }))
+        {
+            BaseAddress = new Uri("https://cursor.com")
+        };
+
+        var provider = new CursorProvider(cookies, credentials, settings, client);
+
+        var status = await provider.FetchStatusAsync(CancellationToken.None);
+
+        Assert.False(status.IsError);
+        Assert.DoesNotContain("Plan: Cursor ", status.TooltipText);
+    }
 }

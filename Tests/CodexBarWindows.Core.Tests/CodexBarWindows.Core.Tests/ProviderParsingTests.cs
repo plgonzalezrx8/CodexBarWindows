@@ -80,4 +80,31 @@ public class ProviderParsingTests
         Assert.Contains("Rider", status.TooltipText);
         Assert.Equal(0.25, status.SessionProgress, 3);
     }
+
+    [Fact]
+    public async Task JetBrains_provider_selects_highest_semantic_version()
+    {
+        using var paths = new TestAppDataPaths();
+        var settings = new SettingsService(paths);
+        settings.CurrentSettings.EnabledProviders["jetbrains"] = true;
+        var env = new FakeEnvironmentService();
+        var appData = Path.Combine(paths.AppDataDirectory, "appdata");
+        env.Folders[Environment.SpecialFolder.ApplicationData] = appData;
+        Directory.CreateDirectory(Path.Combine(appData, "JetBrains", "Rider2024.9", "options"));
+        Directory.CreateDirectory(Path.Combine(appData, "JetBrains", "Rider2024.10", "options"));
+
+        await File.WriteAllTextAsync(
+            Path.Combine(appData, "JetBrains", "Rider2024.9", "options", "other.xml"),
+            """<application><component name="AIAssistantQuotaManager2"><option name="quotaInfo" value="{&quot;type&quot;:&quot;trial&quot;,&quot;current&quot;:&quot;9&quot;,&quot;maximum&quot;:&quot;100&quot;}" /></component></application>""");
+        await File.WriteAllTextAsync(
+            Path.Combine(appData, "JetBrains", "Rider2024.10", "options", "other.xml"),
+            """<application><component name="AIAssistantQuotaManager2"><option name="quotaInfo" value="{&quot;type&quot;:&quot;trial&quot;,&quot;current&quot;:&quot;10&quot;,&quot;maximum&quot;:&quot;100&quot;}" /></component></application>""");
+
+        var provider = new JetBrainsProvider(settings, env);
+
+        var status = await provider.FetchStatusAsync(CancellationToken.None);
+
+        Assert.False(status.IsError);
+        Assert.Contains("10/100", status.TooltipText);
+    }
 }

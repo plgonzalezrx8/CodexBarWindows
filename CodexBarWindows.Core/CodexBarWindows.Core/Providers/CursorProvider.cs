@@ -135,7 +135,7 @@ public class CursorProvider : IProviderProbe
         tooltipParts.Add($"Plan: {planPercentUsed:F1}% used (${planUsedUsd:F2} / ${planLimitUsd:F2})");
         if (onDemandUsedUsd > 0)
             tooltipParts.Add($"On-demand: ${onDemandUsedUsd:F2}" + (onDemandLimitUsd.HasValue ? $" / ${onDemandLimitUsd:F2}" : ""));
-        if (summary.MembershipType != null)
+        if (!string.IsNullOrEmpty(summary.MembershipType))
             tooltipParts.Add($"Plan: Cursor {char.ToUpper(summary.MembershipType[0])}{summary.MembershipType[1..]}");
         if (userInfo?.Email != null)
             tooltipParts.Add($"Account: {userInfo.Email}");

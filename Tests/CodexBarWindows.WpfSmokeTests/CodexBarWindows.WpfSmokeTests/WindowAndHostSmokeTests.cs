@@ -23,6 +23,26 @@ public class WindowAndHostSmokeTests
     }
 
     [Fact]
+    public async Task Closing_settings_window_does_not_save_pending_changes()
+    {
+        await StaTestRunner.RunAsync(() =>
+        {
+            StaTestRunner.EnsureApplication();
+            using var paths = new TestAppDataPaths();
+            var settings = new CodexBarWindows.Services.SettingsService(paths);
+            var viewModel = new SettingsViewModel(settings, new FakeStartupRegistration())
+            {
+                GlobalShortcut = "Ctrl+Shift+C"
+            };
+            var window = new SettingsWindow(viewModel);
+
+            window.Close();
+
+            Assert.Equal(string.Empty, settings.CurrentSettings.GlobalShortcut);
+        });
+    }
+
+    [Fact]
     public async Task Tray_icon_command_opens_settings_window()
     {
         await StaTestRunner.RunAsync(() =>

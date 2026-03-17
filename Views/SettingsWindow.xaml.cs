@@ -14,10 +14,5 @@ public partial class SettingsWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         base.OnClosed(e);
-        // Save on close as well
-        if (DataContext is SettingsViewModel vm)
-        {
-            vm.Save();
-        }
     }
 }

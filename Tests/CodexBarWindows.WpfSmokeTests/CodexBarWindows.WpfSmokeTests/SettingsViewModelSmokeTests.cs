@@ -91,4 +91,20 @@ public class SettingsViewModelSmokeTests
             Assert.True(settings.CurrentSettings.ShowCredits);
         });
     }
+
+    [Fact]
+    public async Task Loading_settings_uses_provider_descriptor_default_when_key_is_missing()
+    {
+        await StaTestRunner.RunAsync(() =>
+        {
+            using var paths = new TestAppDataPaths();
+            var settings = new SettingsService(paths);
+            settings.CurrentSettings.EnabledProviders.Remove("codex");
+            var startup = new FakeStartupRegistration();
+
+            var viewModel = new SettingsViewModel(settings, startup);
+
+            Assert.True(viewModel.Providers.Single(p => p.ProviderId == "codex").IsEnabled);
+        });
+    }
 }
