@@ -10,18 +10,24 @@ public class RefreshLoopService : BackgroundService
     private readonly SettingsService _settingsService;
     private readonly TrayIconViewModel _trayViewModel;
     private readonly IconGeneratorService _iconGenerator;
+    private readonly UsageHistoryService _historyService;
+    private readonly NotificationService _notificationService;
     private TaskCompletionSource<bool> _settingsChangedSignal = CreateSettingsChangedSignal();
 
     public RefreshLoopService(
         IEnumerable<IProviderProbe> providers, 
         SettingsService settingsService,
         TrayIconViewModel trayViewModel,
-        IconGeneratorService iconGenerator)
+        IconGeneratorService iconGenerator,
+        UsageHistoryService historyService,
+        NotificationService notificationService)
     {
         _providers = providers;
         _settingsService = settingsService;
         _trayViewModel = trayViewModel;
         _iconGenerator = iconGenerator;
+        _historyService = historyService;
+        _notificationService = notificationService;
         _settingsService.SettingsChanged += OnSettingsChanged;
     }
 
@@ -41,44 +47,12 @@ public class RefreshLoopService : BackgroundService
         }
     }
 
-    private async Task RefreshProvidersAsync(CancellationToken cancellationToken)
-    {
-        var statuses = new List<(IProviderProbe Provider, ProviderUsageStatus Status)>();
-
-        foreach (var provider in _providers)
-        {
-            if (_settingsService.CurrentSettings.EnabledProviders.TryGetValue(provider.ProviderId, out bool isEnabled) && isEnabled)
-            {
-                try
-                {
-                    var status = await provider.FetchStatusAsync(cancellationToken);
-                    statuses.Add((provider, status));
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"Error fetching {provider.ProviderName}: {ex.Message}");
-                    statuses.Add((provider, new ProviderUsageStatus
-                    {
-                        IsError = true,
-                        ErrorMessage = ex.Message,
-                        TooltipText = $"{provider.ProviderName}: Error"
-                    }));
-                }
-            }
-        }
-
-        var selectedStatus = SelectTrayStatus(statuses);
-        if (selectedStatus != null)
-        {
-            UpdateTrayIcon(selectedStatus);
-        }
-    }
-
     private async Task<bool> WaitForNextRefreshAsync(CancellationToken stoppingToken)
     {
         var intervalMinutes = _settingsService.CurrentSettings.RefreshIntervalMinutes;
         if (intervalMinutes <= 0)
         {
+            // Manual mode: pause the loop until settings change
             try
             {
                 await WaitForSettingsChangeAsync(stoppingToken);
@@ -110,35 +84,6 @@ public class RefreshLoopService : BackgroundService
         return signal.WaitAsync(stoppingToken);
     }
 
-    private ProviderUsageStatus? SelectTrayStatus(IReadOnlyList<(IProviderProbe Provider, ProviderUsageStatus Status)> statuses)
-    {
-        if (statuses.Count == 0)
-        {
-            return null;
-        }
-
-        if (_settingsService.CurrentSettings.ShowMostUsedProvider)
-        {
-            return statuses
-                .OrderByDescending(entry => Math.Max(entry.Status.SessionProgress, entry.Status.WeeklyProgress))
-                .ThenBy(entry => entry.Provider.ProviderName, StringComparer.OrdinalIgnoreCase)
-                .Select(entry => entry.Status)
-                .FirstOrDefault();
-        }
-
-        var preferredProviders = _settingsService.CurrentSettings.OverviewProviders;
-        foreach (var providerId in preferredProviders)
-        {
-            var match = statuses.FirstOrDefault(entry => string.Equals(entry.Provider.ProviderId, providerId, StringComparison.OrdinalIgnoreCase));
-            if (match.Provider != null)
-            {
-                return match.Status;
-            }
-        }
-
-        return statuses[0].Status;
-    }
-
     private void OnSettingsChanged()
     {
         var completedSignal = Interlocked.Exchange(ref _settingsChangedSignal, CreateSettingsChangedSignal());
@@ -154,19 +99,122 @@ public class RefreshLoopService : BackgroundService
     private static TaskCompletionSource<bool> CreateSettingsChangedSignal()
         => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    private void UpdateTrayIcon(ProviderUsageStatus status)
+    private readonly Dictionary<string, int> _consecutiveFailures = new();
+    private readonly Dictionary<string, int> _skipCycles = new();
+
+    private async Task RefreshProvidersAsync(CancellationToken cancellationToken)
+    {
+        var fetchTasks = new List<Task<ProviderUsageStatus>>();
+
+        foreach (var provider in _providers)
+        {
+            if (_settingsService.CurrentSettings.EnabledProviders.TryGetValue(provider.ProviderId, out bool isEnabled) && isEnabled)
+            {
+                // Check backoff skip gate
+                if (_skipCycles.TryGetValue(provider.ProviderId, out int skipsLeft) && skipsLeft > 0)
+                {
+                    _skipCycles[provider.ProviderId] = skipsLeft - 1;
+                    fetchTasks.Add(Task.FromResult(new ProviderUsageStatus
+                    {
+                        ProviderId = provider.ProviderId,
+                        ProviderName = provider.ProviderName,
+                        IsError = true,
+                        ErrorMessage = $"Paused due to consecutive errors. Re-checking soon...",
+                        TooltipText = $"{provider.ProviderName}: Paused (Errors)"
+                    }));
+                    continue;
+                }
+
+                fetchTasks.Add(FetchProviderSafeAsync(provider, cancellationToken));
+            }
+        }
+
+        var statuses = (await Task.WhenAll(fetchTasks)).ToList();
+        
+        // Record for history
+        _historyService.RecordSnapshot(statuses);
+        
+        // Check for session quota notifications
+        _notificationService.ProcessStatuses(statuses);
+        
+        UpdateTrayIcon(statuses);
+    }
+
+    private async Task<ProviderUsageStatus> FetchProviderSafeAsync(IProviderProbe provider, CancellationToken ct)
+    {
+        try
+        {
+            var status = await provider.FetchStatusAsync(ct);
+            if (status.IsError)
+            {
+                HandleFailure(provider.ProviderId);
+            }
+            else
+            {
+                // Reset failure counters on success
+                _consecutiveFailures[provider.ProviderId] = 0;
+                _skipCycles[provider.ProviderId] = 0;
+            }
+            return status;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Error fetching {provider.ProviderName}: {ex.Message}");
+            HandleFailure(provider.ProviderId);
+            return new ProviderUsageStatus 
+            { 
+                ProviderId = provider.ProviderId, 
+                ProviderName = provider.ProviderName, 
+                IsError = true, 
+                ErrorMessage = ex.Message, 
+                TooltipText = $"{provider.ProviderName}: Error" 
+            };
+        }
+    }
+
+    private void HandleFailure(string providerId)
+    {
+        _consecutiveFailures.TryGetValue(providerId, out int fails);
+        fails++;
+        _consecutiveFailures[providerId] = fails;
+
+        // Skip the next N cycles, where N = number of failures (capped at 10 cycles)
+        _skipCycles[providerId] = Math.Min(10, fails);
+    }
+
+    private void UpdateTrayIcon(List<ProviderUsageStatus> statuses)
     {
         System.Windows.Application.Current.Dispatcher.Invoke(() =>
         {
-            var icon = _iconGenerator.GenerateMeterIcon(status.SessionProgress, status.WeeklyProgress, status.IsError);
+            // Update ViewModel for the popup
+            _trayViewModel.ProviderStatuses.Clear();
+            foreach (var s in statuses)
+            {
+                _trayViewModel.ProviderStatuses.Add(s);
+            }
+
+            // Update Icon
+            var icon = _iconGenerator.GenerateMeterIcon(statuses);
             
-            // In a real app we'd update the specific taskbar icon for this provider, 
-            // but for now we update the main one.
             var taskbarIcon = (Hardcodet.Wpf.TaskbarNotification.TaskbarIcon)System.Windows.Application.Current.FindResource("NotifyIcon");
             if (taskbarIcon != null)
             {
                 taskbarIcon.Icon = icon;
-                _trayViewModel.TooltipText = status.TooltipText;
+                
+                // Construct combined tooltip
+                if (statuses.Count == 0)
+                {
+                    _trayViewModel.TooltipText = "CodexBar (No providers enabled)";
+                }
+                else if (statuses.Count == 1)
+                {
+                    _trayViewModel.TooltipText = statuses[0].TooltipText;
+                }
+                else
+                {
+                    var activeCount = statuses.Count(s => !s.IsError);
+                    _trayViewModel.TooltipText = $"CodexBar ({activeCount} active)";
+                }
             }
         });
     }

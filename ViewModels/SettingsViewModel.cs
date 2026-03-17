@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
+using Microsoft.Win32;
 using CodexBarWindows.Services;
 
 namespace CodexBarWindows.ViewModels;
@@ -278,6 +279,7 @@ public class SettingsViewModel : INotifyPropertyChanged
             _ => 5
         };
         s.RunAtStartup = RunAtStartup;
+        UpdateRegistryStartup(RunAtStartup);
         s.EnableStatusChecks = EnableStatusChecks;
         s.EnableSessionNotifications = EnableSessionNotifications;
         s.ShowCostSummary = ShowCostSummary;
@@ -304,15 +306,89 @@ public class SettingsViewModel : INotifyPropertyChanged
         _settingsService.SaveSettings();
     }
 
+    private void UpdateRegistryStartup(bool enable)
+    {
+        try
+        {
+            var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true);
+            if (key == null) return;
+
+            string appName = "CodexBarWindows";
+            if (enable)
+            {
+                var exePath = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
+                if (!string.IsNullOrEmpty(exePath))
+                {
+                    key.SetValue(appName, $"\"{exePath}\"");
+                }
+            }
+            else
+            {
+                key.DeleteValue(appName, false);
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to set startup registry key: {ex.Message}");
+        }
+    }
+
     private void ResetDefaults()
     {
-        var fresh = new AppSettings();
-        // Temporarily swap, reload, then swap back
-        var backup = _settingsService.CurrentSettings;
-        typeof(SettingsService)
-            .GetField("_currentSettings", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-            ?.SetValue(_settingsService, fresh);
-        LoadFromSettings();
+        // Load default values into the view-model only; the live
+        // SettingsService is left untouched until the user clicks Save.
+        LoadFromDefaults(new AppSettings());
+    }
+
+    private void LoadFromDefaults(AppSettings s)
+    {
+        // Providers
+        Providers.Clear();
+        foreach (var (id, name) in AllProviders)
+        {
+            var isEnabled = s.EnabledProviders.GetValueOrDefault(id, false);
+            var cookieSource = s.ProviderCookieSources.GetValueOrDefault(id, "auto");
+            Providers.Add(new ProviderSettingsItem
+            {
+                ProviderId = id,
+                ProviderName = name,
+                IsEnabled = isEnabled,
+                CookieSourceIndex = Array.IndexOf(CookieSourceOptions, cookieSource.Capitalize()) is >= 0 and var idx ? idx : 0
+            });
+        }
+
+        // General
+        RefreshIntervalIndex = s.RefreshIntervalMinutes switch
+        {
+            0 => 0,
+            1 => 1,
+            2 => 2,
+            5 => 3,
+            15 => 4,
+            _ => 3
+        };
+        RunAtStartup = s.RunAtStartup;
+        EnableStatusChecks = s.EnableStatusChecks;
+        EnableSessionNotifications = s.EnableSessionNotifications;
+        ShowCostSummary = s.ShowCostSummary;
+
+        // Display
+        MergeIcons = s.MergeIcons;
+        SwitcherShowsIcons = s.SwitcherShowsIcons;
+        ShowMostUsedProvider = s.ShowMostUsedProvider;
+        MenuBarShowsPercent = s.MenuBarShowsPercent;
+        DisplayModeIndex = Array.IndexOf(DisplayModeOptions, s.DisplayMode) is >= 0 and var di ? di : 0;
+        ShowUsageAsUsed = s.ShowUsageAsUsed;
+        ShowResetTimeAsClock = s.ShowResetTimeAsClock;
+        ShowCredits = s.ShowCredits;
+        ShowAllTokenAccounts = s.ShowAllTokenAccounts;
+
+        // Advanced
+        GlobalShortcut = s.GlobalShortcut;
+        ShowDebugSettings = s.ShowDebugSettings;
+        SurpriseMe = s.SurpriseMe;
+        HidePersonalInfo = s.HidePersonalInfo;
+        DisableCredentialAccess = s.DisableCredentialAccess;
     }
 
     // ── INotifyPropertyChanged ──────────────────────────────────────

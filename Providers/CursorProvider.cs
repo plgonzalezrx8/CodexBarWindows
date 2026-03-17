@@ -141,6 +141,8 @@ public class CursorProvider : IProviderProbe
 
         return new ProviderUsageStatus
         {
+            ProviderId = "cursor",
+            ProviderName = "Cursor",
             SessionProgress = Math.Min(1.0, planPercentUsed / 100.0),
             WeeklyProgress = onDemandLimitUsd.HasValue && onDemandLimitUsd > 0
                 ? Math.Min(1.0, onDemandUsedUsd / onDemandLimitUsd.Value)
@@ -194,6 +196,8 @@ public class CursorProvider : IProviderProbe
 
     private static ProviderUsageStatus MakeError(string message) => new()
     {
+        ProviderId = "cursor",
+        ProviderName = "Cursor",
         IsError = true,
         ErrorMessage = message,
         TooltipText = $"Cursor: {message}"

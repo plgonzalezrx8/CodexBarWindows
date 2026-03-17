@@ -272,6 +272,8 @@ public class AntigravityProvider : IProviderProbe
 
         return new ProviderUsageStatus
         {
+            ProviderId = "antigravity",
+            ProviderName = "Antigravity",
             SessionProgress = Math.Min(1.0, sessionUsed),
             WeeklyProgress = Math.Min(1.0, weeklyUsed),
             IsError = false,
@@ -306,6 +308,8 @@ public class AntigravityProvider : IProviderProbe
 
         return new ProviderUsageStatus
         {
+            ProviderId = "antigravity",
+            ProviderName = "Antigravity",
             SessionProgress = Math.Min(1.0, used),
             WeeklyProgress = 0.0,
             IsError = false,
@@ -322,6 +326,8 @@ public class AntigravityProvider : IProviderProbe
 
     private static ProviderUsageStatus MakeError(string message) => new()
     {
+        ProviderId = "antigravity",
+        ProviderName = "Antigravity",
         IsError = true,
         ErrorMessage = message,
         TooltipText = $"Antigravity: {message}"
