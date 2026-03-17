@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 using CodexBarWindows.Abstractions;
 using CodexBarWindows.Models;
@@ -83,8 +84,8 @@ public class KiroProvider : IProviderProbe
         var creditsMatch = Regex.Match(stripped, @"\((\d+\.?\d*)\s+of\s+(\d+)\s+covered");
         if (creditsMatch.Success)
         {
-            creditsUsed = double.Parse(creditsMatch.Groups[1].Value);
-            creditsTotal = double.Parse(creditsMatch.Groups[2].Value);
+            creditsUsed = double.Parse(creditsMatch.Groups[1].Value, CultureInfo.InvariantCulture);
+            creditsTotal = double.Parse(creditsMatch.Groups[2].Value, CultureInfo.InvariantCulture);
             if (creditsPercent == 0 && creditsTotal > 0)
                 creditsPercent = (creditsUsed / creditsTotal) * 100.0;
         }

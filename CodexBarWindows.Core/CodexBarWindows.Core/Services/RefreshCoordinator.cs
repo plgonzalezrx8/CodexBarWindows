@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using CodexBarWindows.Models;
 
 namespace CodexBarWindows.Services;
@@ -7,8 +8,8 @@ public sealed record RefreshResult(IReadOnlyList<ProviderUsageStatus> Statuses, 
 public class RefreshCoordinator
 {
     private readonly SettingsService _settingsService;
-    private readonly Dictionary<string, int> _consecutiveFailures = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, int> _skipCycles = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, int> _consecutiveFailures = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, int> _skipCycles = new(StringComparer.OrdinalIgnoreCase);
 
     public RefreshCoordinator(SettingsService settingsService)
     {
@@ -28,7 +29,7 @@ public class RefreshCoordinator
 
             if (_skipCycles.TryGetValue(provider.ProviderId, out var skipsLeft) && skipsLeft > 0)
             {
-                _skipCycles[provider.ProviderId] = skipsLeft - 1;
+                _skipCycles.AddOrUpdate(provider.ProviderId, 0, static (_, current) => Math.Max(0, current - 1));
                 fetchTasks.Add(Task.FromResult(new ProviderUsageStatus
                 {
                     ProviderId = provider.ProviderId,
@@ -90,9 +91,7 @@ public class RefreshCoordinator
 
     private void HandleFailure(string providerId)
     {
-        _consecutiveFailures.TryGetValue(providerId, out var failures);
-        failures++;
-        _consecutiveFailures[providerId] = failures;
+        var failures = _consecutiveFailures.AddOrUpdate(providerId, 1, static (_, current) => current + 1);
         _skipCycles[providerId] = Math.Min(10, failures);
     }
 

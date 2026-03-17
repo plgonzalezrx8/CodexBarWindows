@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Globalization;
 using CodexBarWindows.Providers;
 using CodexBarWindows.Services;
 
@@ -58,6 +59,36 @@ public class ProviderParsingTests
         Assert.False(status.IsError);
         Assert.Contains("KIRO PRO", status.TooltipText);
         Assert.True(status.SessionProgress > 0.6);
+    }
+
+    [Fact]
+    public void Kiro_output_parses_decimal_values_with_invariant_culture()
+    {
+        var previousCulture = CultureInfo.CurrentCulture;
+        var previousUiCulture = CultureInfo.CurrentUICulture;
+
+        try
+        {
+            CultureInfo.CurrentCulture = new CultureInfo("de-DE");
+            CultureInfo.CurrentUICulture = new CultureInfo("de-DE");
+
+            var output = """
+                Plan: KIRO PRO
+                █████ 65%
+                (32.5 of 50 covered in plan)
+                """;
+
+            var status = KiroProvider.ParseUsageOutput(output);
+
+            Assert.False(status.IsError);
+            Assert.Contains("Credits:", status.TooltipText);
+            Assert.Equal(0.65, status.SessionProgress, 3);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previousCulture;
+            CultureInfo.CurrentUICulture = previousUiCulture;
+        }
     }
 
     [Fact]
