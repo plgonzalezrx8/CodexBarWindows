@@ -64,8 +64,6 @@ internal sealed class FakeTrayPresenter : ITrayPresenter
     }
 }
 
-<<<<<<< C:/Users/plgon/Downloads/CodexBarWindows/Tests/CodexBarWindows.WpfSmokeTests/CodexBarWindows.WpfSmokeTests/TestSupport.cs
-=======
 internal sealed class FakeProviderProbe : IProviderProbe
 {
     private readonly Queue<Func<Task<ProviderUsageStatus>>> _responses = new();
@@ -100,7 +98,6 @@ internal sealed class FakeProviderProbe : IProviderProbe
     }
 }
 
->>>>>>> C:/Users/plgon/.windsurf/worktrees/CodexBarWindows/CodexBarWindows-03ffe921/Tests/CodexBarWindows.WpfSmokeTests/CodexBarWindows.WpfSmokeTests/TestSupport.cs
 internal static class StaTestRunner
 {
     public static Task RunAsync(Func<Task> action)
