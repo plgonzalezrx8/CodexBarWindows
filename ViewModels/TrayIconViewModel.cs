@@ -1,12 +1,21 @@
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Windows;
 using System.Windows.Input;
+using CodexBarWindows.Models;
+using CodexBarWindows.Views;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace CodexBarWindows.ViewModels;
 
 public class TrayIconViewModel : INotifyPropertyChanged
 {
+    private readonly IServiceProvider _serviceProvider;
     private string _tooltipText = "CodexBar";
+    private SettingsWindow? _settingsWindow;
+
+    public ObservableCollection<ProviderUsageStatus> ProviderStatuses { get; } = new();
 
     public string TooltipText
     {
@@ -24,14 +33,32 @@ public class TrayIconViewModel : INotifyPropertyChanged
     public ICommand ShowSettingsCommand => new RelayCommand(ShowSettings);
     public ICommand ExitApplicationCommand => new RelayCommand(ExitApplication);
 
+    public TrayIconViewModel(IServiceProvider serviceProvider)
+    {
+        _serviceProvider = serviceProvider;
+    }
+
     private void ShowSettings(object? parameter)
     {
-        // TODO: Show Settings Window
+        // Bring existing window to front or create a new one
+        if (_settingsWindow is { IsLoaded: true })
+        {
+            _settingsWindow.Activate();
+            if (_settingsWindow.WindowState == WindowState.Minimized)
+                _settingsWindow.WindowState = WindowState.Normal;
+            return;
+        }
+
+        var viewModel = _serviceProvider.GetRequiredService<SettingsViewModel>();
+        _settingsWindow = new SettingsWindow(viewModel);
+        _settingsWindow.Closed += (_, _) => _settingsWindow = null;
+        _settingsWindow.Show();
     }
 
     private void ExitApplication(object? parameter)
     {
-        System.Windows.Application.Current.Shutdown();
+        _settingsWindow?.Close();
+        Application.Current.Shutdown();
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

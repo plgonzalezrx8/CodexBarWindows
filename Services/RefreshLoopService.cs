@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Hosting;
+using CodexBarWindows.Abstractions;
 using CodexBarWindows.Models;
-using CodexBarWindows.ViewModels;
 
 namespace CodexBarWindows.Services;
 
@@ -8,19 +8,27 @@ public class RefreshLoopService : BackgroundService
 {
     private readonly IEnumerable<IProviderProbe> _providers;
     private readonly SettingsService _settingsService;
-    private readonly TrayIconViewModel _trayViewModel;
-    private readonly IconGeneratorService _iconGenerator;
+    private readonly RefreshCoordinator _refreshCoordinator;
+    private readonly UsageHistoryService _historyService;
+    private readonly NotificationService _notificationService;
+    private readonly ITrayPresenter _trayPresenter;
+    private TaskCompletionSource<bool> _settingsChangedSignal = CreateSettingsChangedSignal();
 
     public RefreshLoopService(
-        IEnumerable<IProviderProbe> providers, 
+        IEnumerable<IProviderProbe> providers,
         SettingsService settingsService,
-        TrayIconViewModel trayViewModel,
-        IconGeneratorService iconGenerator)
+        RefreshCoordinator refreshCoordinator,
+        UsageHistoryService historyService,
+        NotificationService notificationService,
+        ITrayPresenter trayPresenter)
     {
         _providers = providers;
         _settingsService = settingsService;
-        _trayViewModel = trayViewModel;
-        _iconGenerator = iconGenerator;
+        _refreshCoordinator = refreshCoordinator;
+        _historyService = historyService;
+        _notificationService = notificationService;
+        _trayPresenter = trayPresenter;
+        _settingsService.SettingsChanged += OnSettingsChanged;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -31,54 +39,71 @@ public class RefreshLoopService : BackgroundService
         while (!stoppingToken.IsCancellationRequested)
         {
             await RefreshProvidersAsync(stoppingToken);
-            
-            var interval = TimeSpan.FromMinutes(_settingsService.CurrentSettings.RefreshIntervalMinutes);
-            
-            try
-            {
-                await Task.Delay(interval, stoppingToken);
-            }
-            catch (TaskCanceledException)
+
+            if (!await WaitForNextRefreshAsync(stoppingToken))
             {
                 break;
             }
         }
     }
 
-    private async Task RefreshProvidersAsync(CancellationToken cancellationToken)
+    private async Task<bool> WaitForNextRefreshAsync(CancellationToken stoppingToken)
     {
-        foreach (var provider in _providers)
+        var intervalMinutes = _settingsService.CurrentSettings.RefreshIntervalMinutes;
+        if (intervalMinutes <= 0)
         {
-            if (_settingsService.CurrentSettings.EnabledProviders.TryGetValue(provider.ProviderId, out bool isEnabled) && isEnabled)
+            // Manual mode: pause the loop until settings change
+            try
             {
-                try
-                {
-                    var status = await provider.FetchStatusAsync(cancellationToken);
-                    UpdateTrayIcon(status);
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"Error fetching {provider.ProviderName}: {ex.Message}");
-                    UpdateTrayIcon(new ProviderUsageStatus { IsError = true, ErrorMessage = ex.Message, TooltipText = $"{provider.ProviderName}: Error" });
-                }
+                await WaitForSettingsChangeAsync(stoppingToken);
+                return true;
             }
+            catch (OperationCanceledException)
+            {
+                return false;
+            }
+        }
+
+        var delayTask = Task.Delay(TimeSpan.FromMinutes(intervalMinutes), stoppingToken);
+        var settingsChangedTask = WaitForSettingsChangeAsync(stoppingToken);
+
+        try
+        {
+            await Task.WhenAny(delayTask, settingsChangedTask);
+            return !stoppingToken.IsCancellationRequested;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
         }
     }
 
-    private void UpdateTrayIcon(ProviderUsageStatus status)
+    private Task WaitForSettingsChangeAsync(CancellationToken stoppingToken)
     {
-        System.Windows.Application.Current.Dispatcher.Invoke(() =>
-        {
-            var icon = _iconGenerator.GenerateMeterIcon(status.SessionProgress, status.WeeklyProgress, status.IsError);
-            
-            // In a real app we'd update the specific taskbar icon for this provider, 
-            // but for now we update the main one.
-            var taskbarIcon = (Hardcodet.Wpf.TaskbarNotification.TaskbarIcon)System.Windows.Application.Current.FindResource("NotifyIcon");
-            if (taskbarIcon != null)
-            {
-                taskbarIcon.Icon = icon;
-                _trayViewModel.TooltipText = status.TooltipText;
-            }
-        });
+        var signal = _settingsChangedSignal.Task;
+        return signal.WaitAsync(stoppingToken);
+    }
+
+    private void OnSettingsChanged()
+    {
+        var completedSignal = Interlocked.Exchange(ref _settingsChangedSignal, CreateSettingsChangedSignal());
+        completedSignal.TrySetResult(true);
+    }
+
+    public override void Dispose()
+    {
+        _settingsService.SettingsChanged -= OnSettingsChanged;
+        base.Dispose();
+    }
+
+    private static TaskCompletionSource<bool> CreateSettingsChangedSignal()
+        => new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    private async Task RefreshProvidersAsync(CancellationToken cancellationToken)
+    {
+        var result = await _refreshCoordinator.RefreshAsync(_providers, cancellationToken);
+        _historyService.RecordSnapshot(result.Statuses.ToList());
+        _notificationService.ProcessStatuses(result.Statuses);
+        _trayPresenter.Present(result);
     }
 }

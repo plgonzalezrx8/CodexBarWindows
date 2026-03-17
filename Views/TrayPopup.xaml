@@ -1,0 +1,129 @@
+<UserControl x:Class="CodexBarWindows.Views.TrayPopup"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:vm="clr-namespace:CodexBarWindows.ViewModels"
+             xmlns:conv="clr-namespace:CodexBarWindows.Converters"
+             mc:Ignorable="d" 
+             d:DataContext="{d:DesignInstance Type=vm:TrayIconViewModel}"
+             Background="#1E1E1E"
+             Foreground="#E0E0E0"
+             Width="320"
+             BorderBrush="#333333"
+             BorderThickness="1"
+             Padding="10">
+
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
+        <conv:ProgressToGridLengthConverter x:Key="ProgressToGridLengthConverter"/>
+        <conv:RemainingToGridLengthConverter x:Key="RemainingToGridLengthConverter"/>
+
+        <Style TargetType="TextBlock" x:Key="BaseText">
+            <Setter Property="FontFamily" Value="Segoe UI"/>
+            <Setter Property="Foreground" Value="#CCCCCC"/>
+        </Style>
+        
+        <Style TargetType="TextBlock" BasedOn="{StaticResource BaseText}" x:Key="TitleText">
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Foreground" Value="#FFFFFF"/>
+        </Style>
+    </UserControl.Resources>
+
+    <StackPanel>
+        <!-- Header -->
+        <Grid Margin="0,0,0,10">
+            <TextBlock Text="CodexBar" Style="{StaticResource TitleText}" />
+            <Button Content="Settings" 
+                    Command="{Binding ShowSettingsCommand}" 
+                    HorizontalAlignment="Right"
+                    Background="Transparent"
+                    Foreground="#888888"
+                    BorderThickness="0"
+                    Cursor="Hand">
+                <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                        <TextBlock Text="{TemplateBinding Content}" Foreground="{TemplateBinding Foreground}"/>
+                    </ControlTemplate>
+                </Button.Template>
+            </Button>
+        </Grid>
+        
+        <!-- Separator -->
+        <Rectangle Height="1" Fill="#333333" Margin="0,0,0,10"/>
+
+        <!-- Items Control for Providers -->
+        <ItemsControl ItemsSource="{Binding ProviderStatuses}">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <Border Background="#2A2A2A" CornerRadius="6" Margin="0,0,0,8" Padding="12">
+                        <StackPanel>
+                            <!-- Title Row -->
+                            <Grid>
+                                <TextBlock Text="{Binding ProviderName}" FontWeight="SemiBold" Foreground="#FFFFFF"/>
+                            </Grid>
+
+                            <!-- Tooltip Text (Temporary detailed view) -->
+                            <TextBlock Text="{Binding TooltipText}" 
+                                       Foreground="#AAAAAA" 
+                                       FontSize="11" 
+                                       Margin="0,6,0,0"
+                                       TextWrapping="Wrap"/>
+                                       
+                            <!-- Progress Bars -->
+                            <!-- Session Bar -->
+                            <Grid Margin="0,8,0,4" Height="6">
+                                <Rectangle Fill="#1A1A1A" RadiusX="3" RadiusY="3"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="{Binding SessionProgress, Converter={StaticResource ProgressToGridLengthConverter}}"/>
+                                        <ColumnDefinition Width="{Binding SessionProgress, Converter={StaticResource RemainingToGridLengthConverter}}"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Rectangle Fill="#0A84FF" RadiusX="3" RadiusY="3" Grid.Column="0"/>
+                                </Grid>
+                            </Grid>
+                            
+                                <!-- Weekly Bar -->
+                            <Grid Margin="0,0,0,4" Height="3">
+                                <Rectangle Fill="#1A1A1A" RadiusX="1" RadiusY="1"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="{Binding WeeklyProgress, Converter={StaticResource ProgressToGridLengthConverter}}"/>
+                                        <ColumnDefinition Width="{Binding WeeklyProgress, Converter={StaticResource RemainingToGridLengthConverter}}"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Rectangle Fill="#FF9500" RadiusX="1" RadiusY="1" Grid.Column="0"/>
+                                </Grid>
+                            </Grid>
+                            
+                            <!-- Error state -->
+                            <TextBlock Text="{Binding ErrorMessage}"  
+                                       Foreground="#FF453A" 
+                                       FontSize="11" 
+                                       Margin="0,4,0,0"
+                                       Visibility="{Binding IsError, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                        </StackPanel>
+                    </Border>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        
+        <!-- Empty State -->
+        <TextBlock Text="No providers enabled or loading..." 
+                   Foreground="#888888" 
+                   FontStyle="Italic"
+                   HorizontalAlignment="Center"
+                   Margin="0,10,0,10">
+            <TextBlock.Style>
+                <Style TargetType="TextBlock">
+                    <Setter Property="Visibility" Value="Collapsed"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding ProviderStatuses.Count}" Value="0">
+                            <Setter Property="Visibility" Value="Visible"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </TextBlock.Style>
+        </TextBlock>
+    </StackPanel>
+</UserControl>

@@ -1,12 +1,11 @@
-﻿using System.IO;
+using System.IO;
 using System.Windows;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Hardcodet.Wpf.TaskbarNotification;
 using CodexBarWindows.ViewModels;
 using CodexBarWindows.Services;
 using CodexBarWindows.Models;
-using CodexBarWindows.Providers;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace CodexBarWindows;
 
@@ -40,35 +39,44 @@ public partial class App : Application
 
         try
         {
-            _host = Host.CreateDefaultBuilder(e.Args)
-                .ConfigureServices((context, services) =>
-                {
-                    // ViewModels
-                    services.AddSingleton<TrayIconViewModel>();
-
-                    // Core Services
-                    services.AddSingleton<SettingsService>();
-                    services.AddSingleton<IconGeneratorService>();
-                    services.AddSingleton<CliExecutionHelper>();
-
-                    // Providers
-                    services.AddTransient<IProviderProbe, CodexProvider>();
-
-                    // Background Services
-                    services.AddHostedService<RefreshLoopService>();
-                })
-                .Build();
+            var testMode = Environment.GetEnvironmentVariable("CODEXBAR_TEST_MODE") == "1";
+            _host = AppHostFactory.Create(
+                e.Args,
+                testMode
+                    ? new AppHostOptions(DisableBackgroundRefresh: true, DisableUpdateChecks: true, DisableHotkeys: true)
+                    : null);
 
             await _host.StartAsync();
 
             // Initialize System Tray Icon
             _taskbarIcon = (TaskbarIcon)FindResource("NotifyIcon");
 
+            // Instantiate initial services
+            if (!testMode)
+            {
+                _host.Services.GetRequiredService<GlobalHotkeyService>();
+            }
+            
+            // Background check for updates
+            if (!testMode)
+            {
+                _ = _host.Services.GetRequiredService<UpdateService>().CheckForUpdatesAsync();
+            }
+
             // Generate a default icon programmatically
             var iconGenerator = _host.Services.GetRequiredService<IconGeneratorService>();
-            _taskbarIcon.Icon = iconGenerator.GenerateMeterIcon(0.0, 0.0);
+            _taskbarIcon.Icon = iconGenerator.GenerateMeterIcon(new List<ProviderUsageStatus>());
 
-            _taskbarIcon.DataContext = _host.Services.GetRequiredService<TrayIconViewModel>();
+            var trayViewModel = _host.Services.GetRequiredService<TrayIconViewModel>();
+            _taskbarIcon.DataContext = trayViewModel;
+            if (_taskbarIcon.TrayPopup is FrameworkElement trayPopup)
+            {
+                trayPopup.DataContext = trayViewModel;
+            }
+            if (_taskbarIcon.ContextMenu != null)
+            {
+                _taskbarIcon.ContextMenu.DataContext = trayViewModel;
+            }
         }
         catch (Exception ex)
         {
@@ -95,11 +103,10 @@ public partial class App : Application
     {
         try
         {
-            var logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "CodexBarWindows");
-            Directory.CreateDirectory(logDir);
-            var logPath = Path.Combine(logDir, "crash.log");
+            var paths = new WindowsAppDataPaths();
+            Directory.CreateDirectory(paths.AppDataDirectory);
             var entry = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [{source}] {ex}\n\n";
-            File.AppendAllText(logPath, entry);
+            File.AppendAllText(paths.CrashLogFilePath, entry);
         }
         catch
         {

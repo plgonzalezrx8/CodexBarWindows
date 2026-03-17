@@ -1,70 +1,152 @@
 using System.Drawing;
 using System.Drawing.Drawing2D;
-using System.Windows;
-using System.Windows.Interop;
-using System.Windows.Media.Imaging;
+using System.Runtime.InteropServices;
+using CodexBarWindows.Models;
 
 namespace CodexBarWindows.Services;
 
 public class IconGeneratorService
 {
-    // Generates a tiny two-bar meter icon based on progress fractions (0.0 to 1.0)
-    // Top bar: session progress
-    // Bottom bar: weekly progress
-    public Icon GenerateMeterIcon(double sessionProgress, double weeklyProgress, bool isError = false)
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool DestroyIcon(nint hIcon);
+
+    private readonly SettingsService _settingsService;
+
+    public IconGeneratorService(SettingsService settingsService)
     {
-        int width = 16;
-        int height = 16;
-        
+        _settingsService = settingsService;
+    }
+
+    public Icon GenerateMeterIcon(IEnumerable<ProviderUsageStatus> statuses)
+    {
+        var settings = _settingsService.CurrentSettings;
+        var activeStatuses = statuses.Where(s => !s.IsError).ToList();
+
+        if (activeStatuses.Count == 0)
+        {
+            // Fallback empty icon
+            return GenerateSingleIcon(null);
+        }
+
+        if (settings.MergeIcons && activeStatuses.Count > 1)
+        {
+            return GenerateMergedIcon(activeStatuses);
+        }
+        else
+        {
+            // Just show the first active one, or the user's primary selected one if we track that
+            return GenerateSingleIcon(activeStatuses.First());
+        }
+    }
+
+    private Icon GenerateSingleIcon(ProviderUsageStatus? status)
+    {
+        int width = 16, height = 16;
         using var bitmap = new Bitmap(width, height);
         using var g = Graphics.FromImage(bitmap);
         
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.Clear(Color.Transparent);
 
-        // Define colors
-        var sessionColor = isError ? Color.Gray : Color.LightBlue;
-        var weeklyColor = isError ? Color.DarkGray : Color.DarkBlue;
-        var bgColor = Color.FromArgb(100, 100, 100, 100);
+        if (status == null)
+            return ConvertToIcon(bitmap);
 
-        // Top bar (Session) - Thicker
-        int sessionBarY = 2;
-        int sessionBarHeight = 4;
-        
-        // Background for top bar
+        var (primaryColor, secondaryColor) = GetProviderColors(status.ProviderId, status.IsError);
+        var bgColor = Color.FromArgb(80, 100, 100, 100);
+
+        // Top bar (Session)
         using (var bgBrush = new SolidBrush(bgColor))
         {
-            g.FillRectangle(bgBrush, 0, sessionBarY, width, sessionBarHeight);
+            g.FillRectangle(bgBrush, 0, 2, width, 4);
         }
-        
-        // Progress for top bar
-        using (var progressBrush = new SolidBrush(sessionColor))
+        using (var progressBrush = new SolidBrush(primaryColor))
         {
-            int fillWidth = (int)(width * Math.Clamp(sessionProgress, 0, 1));
+            int fillWidth = (int)(width * Math.Clamp(status.SessionProgress, 0, 1));
             if (fillWidth > 0)
-                g.FillRectangle(progressBrush, 0, sessionBarY, fillWidth, sessionBarHeight);
+                g.FillRectangle(progressBrush, 0, 2, fillWidth, 4);
         }
 
-        // Bottom bar (Weekly) - Hairline
-        int weeklyBarY = 8;
-        int weeklyBarHeight = 2;
-
-        // Background for bottom bar
+        // Bottom bar (Weekly)
         using (var bgBrush = new SolidBrush(bgColor))
         {
-            g.FillRectangle(bgBrush, 0, weeklyBarY, width, weeklyBarHeight);
+            g.FillRectangle(bgBrush, 0, 8, width, 2);
         }
-
-        // Progress for bottom bar
-        using (var progressBrush = new SolidBrush(weeklyColor))
+        using (var progressBrush = new SolidBrush(secondaryColor))
         {
-            int fillWidth = (int)(width * Math.Clamp(weeklyProgress, 0, 1));
+            int fillWidth = (int)(width * Math.Clamp(status.WeeklyProgress, 0, 1));
             if (fillWidth > 0)
-                g.FillRectangle(progressBrush, 0, weeklyBarY, fillWidth, weeklyBarHeight);
+                g.FillRectangle(progressBrush, 0, 8, fillWidth, 2);
         }
 
-        // Convert Bitmap to Icon
+        return ConvertToIcon(bitmap);
+    }
+
+    private Icon GenerateMergedIcon(List<ProviderUsageStatus> statuses)
+    {
+        int width = 16, height = 16;
+        using var bitmap = new Bitmap(width, height);
+        using var g = Graphics.FromImage(bitmap);
+        
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.Clear(Color.Transparent);
+
+        // Draw multiple thin vertical bars or stacked horizontal bars depending on count
+        int barHeight = Math.Max(2, 12 / statuses.Count);
+        int currentY = 2; // Start a little down
+
+        foreach (var status in statuses.Take(6)) // Max 6 to fit in 16px roughly
+        {
+            var (primaryColor, _) = GetProviderColors(status.ProviderId, status.IsError);
+            var bgColor = Color.FromArgb(80, 100, 100, 100);
+
+            using (var bgBrush = new SolidBrush(bgColor))
+            {
+                g.FillRectangle(bgBrush, 0, currentY, width, barHeight - 1); // 1px spacing
+            }
+            using (var progressBrush = new SolidBrush(primaryColor))
+            {
+                int fillWidth = (int)(width * Math.Clamp(status.SessionProgress, 0, 1));
+                if (fillWidth > 0)
+                    g.FillRectangle(progressBrush, 0, currentY, fillWidth, barHeight - 1);
+            }
+
+            currentY += barHeight;
+        }
+
+        return ConvertToIcon(bitmap);
+    }
+
+    private (Color primary, Color secondary) GetProviderColors(string providerId, bool isError)
+    {
+        if (isError) return (Color.Gray, Color.DarkGray);
+
+        return providerId.ToLowerInvariant() switch
+        {
+            "codex" => (Color.FromArgb(255, 30, 215, 96), Color.FromArgb(255, 15, 120, 50)), // Green
+            "claude" => (Color.FromArgb(255, 230, 115, 53), Color.FromArgb(255, 120, 50, 20)), // Orange
+            "cursor" => (Color.FromArgb(255, 0, 122, 255), Color.FromArgb(255, 0, 60, 130)), // Blue
+            "gemini" => (Color.FromArgb(255, 66, 133, 244), Color.FromArgb(255, 234, 67, 53)), // Blue/Red
+            "antigravity" => (Color.FromArgb(255, 200, 200, 200), Color.FromArgb(255, 100, 100, 100)), // White/Gray
+            "copilot" => (Color.FromArgb(255, 168, 85, 247), Color.FromArgb(255, 90, 40, 140)), // Purple
+            "openrouter" => (Color.FromArgb(255, 255, 107, 107), Color.FromArgb(255, 180, 50, 50)), // Red/Coral
+            "kiro" => (Color.FromArgb(255, 0, 188, 212), Color.FromArgb(255, 0, 100, 120)), // Cyan
+            "jetbrains" => (Color.FromArgb(255, 255, 87, 34), Color.FromArgb(255, 120, 40, 15)), // Deep Orange
+            "augment" => (Color.FromArgb(255, 76, 175, 80), Color.FromArgb(255, 35, 90, 40)), // Green
+            _ => (Color.LightBlue, Color.DarkBlue)
+        };
+    }
+
+    private Icon ConvertToIcon(Bitmap bitmap)
+    {
         nint hIcon = bitmap.GetHicon();
-        return Icon.FromHandle(hIcon);
+        try
+        {
+            using var tempIcon = Icon.FromHandle(hIcon);
+            return (Icon)tempIcon.Clone();
+        }
+        finally
+        {
+            DestroyIcon(hIcon);
+        }
     }
 }
