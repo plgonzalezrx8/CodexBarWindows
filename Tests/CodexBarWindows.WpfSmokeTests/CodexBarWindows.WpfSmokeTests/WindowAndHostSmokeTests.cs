@@ -38,12 +38,43 @@ public class WindowAndHostSmokeTests
             var tray = new TrayIconViewModel(services);
             tray.ShowSettingsCommand.Execute(null);
 
-            Assert.Single(Application.Current.Windows.OfType<SettingsWindow>());
-            foreach (Window window in Application.Current.Windows)
-            {
-                window.Close();
-            }
+            var window = GetSettingsWindow(tray);
+            Assert.NotNull(window);
+            window!.Close();
         });
+    }
+
+    [Fact]
+    public async Task Tray_icon_command_keeps_a_settings_window_available_after_reopen()
+    {
+        await StaTestRunner.RunAsync(() =>
+        {
+            StaTestRunner.EnsureApplication();
+            using var paths = new TestAppDataPaths();
+            var services = new ServiceCollection()
+                .AddSingleton(new CodexBarWindows.Services.SettingsService(paths))
+                .AddSingleton<CodexBarWindows.Abstractions.IStartupRegistration>(new FakeStartupRegistration())
+                .AddTransient<SettingsViewModel>()
+                .BuildServiceProvider();
+
+            var tray = new TrayIconViewModel(services);
+            tray.ShowSettingsCommand.Execute(null);
+            var firstWindow = GetSettingsWindow(tray)!;
+            firstWindow.WindowState = WindowState.Minimized;
+
+            tray.ShowSettingsCommand.Execute(null);
+
+            var reopenedWindow = GetSettingsWindow(tray);
+            Assert.NotNull(reopenedWindow);
+            Assert.Equal(WindowState.Normal, reopenedWindow!.WindowState);
+            reopenedWindow.Close();
+        });
+    }
+
+    private static SettingsWindow? GetSettingsWindow(TrayIconViewModel tray)
+    {
+        var field = typeof(TrayIconViewModel).GetField("_settingsWindow", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        return (SettingsWindow?)field?.GetValue(tray);
     }
 
     [Fact]

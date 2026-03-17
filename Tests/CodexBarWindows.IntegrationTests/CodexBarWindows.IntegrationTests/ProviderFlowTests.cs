@@ -125,4 +125,59 @@ public class ProviderFlowTests
         Assert.Contains("augment@example.com", status.TooltipText);
         Assert.Contains("Team", status.TooltipText);
     }
+
+    [Fact]
+    public async Task Claude_provider_falls_back_from_expired_cached_cookie_to_browser_cookie()
+    {
+        using var paths = new TestAppDataPaths();
+        var settings = new SettingsService(paths);
+        var commandRunner = new FakeCommandRunner();
+        var cookies = new FakeCookieSource { CookieHeader = "sessionKey=browser-cookie" };
+        var credentials = new FakeCredentialStore();
+        credentials.CacheCookieHeader("claude", "sessionKey=expired-cookie", "test");
+        var seenCookies = new List<string>();
+        var client = new HttpClient(new StubHttpMessageHandler(request =>
+        {
+            var cookie = request.Headers.GetValues("Cookie").Single();
+            seenCookies.Add(cookie);
+
+            if (cookie.Contains("expired-cookie", StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.Unauthorized);
+            }
+
+            return request.RequestUri!.AbsoluteUri.Contains("/organizations/", StringComparison.OrdinalIgnoreCase)
+                ? new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("""{"five_hour":{"utilization":25},"seven_day":{"utilization":50}}""", Encoding.UTF8, "application/json")
+                }
+                : new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("""[{"uuid":"org_123","capabilities":["chat"]}]""", Encoding.UTF8, "application/json")
+                };
+        }));
+
+        var provider = new ClaudeProvider(commandRunner, cookies, settings, credentials, client);
+
+        var status = await provider.FetchStatusAsync(CancellationToken.None);
+
+        Assert.False(status.IsError);
+        Assert.Equal(2, seenCookies.Distinct().Count());
+        Assert.Equal("sessionKey=browser-cookie", credentials.GetCachedCookieHeader("claude")?.CookieHeader);
+    }
+
+    [Fact]
+    public async Task Cursor_provider_reports_auth_failure_when_no_cookie_is_available()
+    {
+        using var paths = new TestAppDataPaths();
+        var settings = new SettingsService(paths);
+        var cookies = new FakeCookieSource();
+        var credentials = new FakeCredentialStore();
+        var provider = new CursorProvider(cookies, credentials, settings, new HttpClient(new StubHttpMessageHandler(_ => throw new InvalidOperationException())));
+
+        var status = await provider.FetchStatusAsync(CancellationToken.None);
+
+        Assert.True(status.IsError);
+        Assert.Contains("Log in", status.TooltipText);
+    }
 }

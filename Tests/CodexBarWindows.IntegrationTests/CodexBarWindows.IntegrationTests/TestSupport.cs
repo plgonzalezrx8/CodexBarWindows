@@ -111,3 +111,20 @@ internal sealed class StubHttpMessageHandler : HttpMessageHandler
         return Task.FromResult(_handler(request));
     }
 }
+
+internal sealed class FakeCommandRunner : ICommandRunner
+{
+    public bool Exists { get; set; }
+
+    public Task<CommandResult> ExecuteCommandAsync(
+        string command,
+        string arguments,
+        string? standardInput = null,
+        int timeoutMilliseconds = 10000,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(new CommandResult(0, string.Empty, string.Empty));
+    }
+
+    public bool CommandExists(string command) => Exists;
+}
