@@ -153,7 +153,7 @@ public class ClaudeProvider : IProviderProbe
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         request.Content = new StringContent(string.Empty, Encoding.UTF8, "application/json");
         request.Headers.TryAddWithoutValidation("anthropic-beta", OAuthBetaHeader);
-        request.Headers.TryAddWithoutValidation("User-Agent", $"claude-code/{DetectClaudeVersion()}");
+        request.Headers.TryAddWithoutValidation("User-Agent", $"claude-code/{await DetectClaudeVersionAsync()}");
 
         using var response = await _httpClient.SendAsync(request, cancellationToken);
         if (response.StatusCode == HttpStatusCode.Unauthorized)
@@ -285,21 +285,21 @@ public class ClaudeProvider : IProviderProbe
             if (!existingDoc.RootElement.TryGetProperty("claudeAiOauth", out var existingOauth))
                 return;
 
-            var oauthDict = JsonSerializer.Deserialize<Dictionary<string, object?>>(existingOauth.GetRawText()) ?? [];
+            var oauthDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(existingOauth.GetRawText()) ?? [];
 
             if (refreshResponse.TryGetProperty("access_token", out var newAt))
-                oauthDict["accessToken"] = newAt.GetString();
+                oauthDict["accessToken"] = newAt;
             if (refreshResponse.TryGetProperty("refresh_token", out var newRt))
-                oauthDict["refreshToken"] = newRt.GetString();
+                oauthDict["refreshToken"] = newRt;
             if (refreshResponse.TryGetProperty("expires_in", out var ei))
             {
                 var expiresIn = ei.GetDouble();
                 var expiryMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + (long)(expiresIn * 1000);
-                oauthDict["expiresAt"] = expiryMs;
+                oauthDict["expiresAt"] = JsonDocument.Parse(expiryMs.ToString()).RootElement;
             }
 
-            var fullDict = JsonSerializer.Deserialize<Dictionary<string, object?>>(existingJson) ?? [];
-            fullDict["claudeAiOauth"] = oauthDict;
+            var fullDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(existingJson) ?? [];
+            fullDict["claudeAiOauth"] = JsonDocument.Parse(JsonSerializer.Serialize(oauthDict)).RootElement;
 
             var updatedJson = JsonSerializer.Serialize(fullDict, new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(credsPath, updatedJson);
@@ -608,11 +608,11 @@ public class ClaudeProvider : IProviderProbe
     private static string StripAnsiCodes(string text) =>
         Regex.Replace(text, @"\x1B\[[0-9;]*[A-Za-z]", "");
 
-    private string DetectClaudeVersion()
+    private async Task<string> DetectClaudeVersionAsync()
     {
         try
         {
-            var result = _commandRunner.ExecuteCommandAsync("claude", "--version", timeoutMilliseconds: 3000).GetAwaiter().GetResult();
+            var result = await _commandRunner.ExecuteCommandAsync("claude", "--version", timeoutMilliseconds: 3000);
             if (result.ExitCode == 0 && !string.IsNullOrWhiteSpace(result.Output))
             {
                 var version = result.Output.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries)[0];

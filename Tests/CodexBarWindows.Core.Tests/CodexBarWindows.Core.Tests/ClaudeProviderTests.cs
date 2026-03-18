@@ -7,6 +7,17 @@ namespace CodexBarWindows.Core.Tests;
 
 public class ClaudeProviderTests
 {
+    /// <summary>
+    /// Creates a FakeEnvironmentService with UserProfile configured to a non-existent
+    /// directory so the OAuth path returns null cleanly instead of throwing.
+    /// </summary>
+    private static FakeEnvironmentService CreateFakeEnv()
+    {
+        var env = new FakeEnvironmentService();
+        env.Folders[Environment.SpecialFolder.UserProfile] = Path.Combine(Path.GetTempPath(), "codexbar-test-nonexistent");
+        return env;
+    }
+
     [Fact]
     public async Task Uses_cached_cookie_before_browser_cookie()
     {
@@ -25,7 +36,7 @@ public class ClaudeProviderTests
                 : Json("""[{"uuid":"org_123","name":"Primary","capabilities":["chat"]}]""");
         }));
 
-        var provider = new ClaudeProvider(commandRunner, cookies, settings, credentials, new FakeEnvironmentService(), client);
+        var provider = new ClaudeProvider(commandRunner, cookies, settings, credentials, CreateFakeEnv(), client);
 
         var status = await provider.FetchStatusAsync(CancellationToken.None);
 
@@ -58,7 +69,7 @@ public class ClaudeProviderTests
                 : Json("""[{"uuid":"org_123","name":"Primary","capabilities":["chat"]}]""");
         }));
 
-        var provider = new ClaudeProvider(commandRunner, cookies, settings, credentials, new FakeEnvironmentService(), client);
+        var provider = new ClaudeProvider(commandRunner, cookies, settings, credentials, CreateFakeEnv(), client);
 
         var status = await provider.FetchStatusAsync(CancellationToken.None);
 
@@ -75,7 +86,7 @@ public class ClaudeProviderTests
         var commandRunner = new FakeCommandRunner { Exists = true };
         var cookies = new FakeCookieSource { CookieHeader = "foo=bar" };
         var credentials = new FakeCredentialStore();
-        var provider = new ClaudeProvider(commandRunner, cookies, settings, credentials, new FakeEnvironmentService(), new HttpClient(new StubHttpMessageHandler(_ => throw new InvalidOperationException())));
+        var provider = new ClaudeProvider(commandRunner, cookies, settings, credentials, CreateFakeEnv(), new HttpClient(new StubHttpMessageHandler(_ => throw new InvalidOperationException())));
 
         var status = await provider.FetchStatusAsync(CancellationToken.None);
 
@@ -103,7 +114,7 @@ public class ClaudeProviderTests
             return Json("[{\"uuid\":\"org_api\",\"name\":\"API\",\"capabilities\":[\"api\"]},{\"uuid\":\"org_chat\",\"name\":\"Chat\",\"capabilities\":[\"chat\"]}]");
         }));
 
-        var provider = new ClaudeProvider(commandRunner, cookies, settings, credentials, new FakeEnvironmentService(), client);
+        var provider = new ClaudeProvider(commandRunner, cookies, settings, credentials, CreateFakeEnv(), client);
 
         var status = await provider.FetchStatusAsync(CancellationToken.None);
 

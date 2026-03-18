@@ -108,7 +108,7 @@ public class GeminiProvider : IProviderProbe
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
 
         var requestBody = projectId != null
-            ? $"{{\"project\": \"{projectId}\"}}"
+            ? JsonSerializer.Serialize(new { project = projectId })
             : "{}";
         request.Content = new StringContent(requestBody, Encoding.UTF8, "application/json");
 
@@ -430,7 +430,7 @@ public class GeminiProvider : IProviderProbe
         var searchRoots = new List<string>();
 
         // 2a. Resolve the gemini binary by searching PATH (covers nvm, volta, fnm, etc.)
-        var pathValue = Environment.GetEnvironmentVariable("PATH") ?? "";
+        var pathValue = _environmentService.GetEnvironmentVariable("PATH") ?? "";
         var extensions = new[] { ".ps1", ".cmd", ".bat", ".exe", "" };
         foreach (var dir in pathValue.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
         {

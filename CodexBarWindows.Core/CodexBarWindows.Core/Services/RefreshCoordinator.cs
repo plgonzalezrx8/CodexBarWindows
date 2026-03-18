@@ -14,6 +14,8 @@ public class RefreshCoordinator
     public RefreshCoordinator(SettingsService settingsService)
     {
         _settingsService = settingsService;
+        // Both RefreshCoordinator and SettingsService are singletons with identical
+        // lifetimes (the application host), so unsubscription is not needed.
         _settingsService.SettingsChanged += ResetFailureTracking;
     }
 

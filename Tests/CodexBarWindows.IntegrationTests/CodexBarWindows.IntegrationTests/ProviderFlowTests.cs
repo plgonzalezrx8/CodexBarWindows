@@ -157,7 +157,9 @@ public class ProviderFlowTests
                 };
         }));
 
-        var provider = new ClaudeProvider(commandRunner, cookies, settings, credentials, new FakeEnvironmentService(), client);
+        var env = new FakeEnvironmentService();
+        env.Folders[Environment.SpecialFolder.UserProfile] = Path.Combine(Path.GetTempPath(), "codexbar-test-nonexistent");
+        var provider = new ClaudeProvider(commandRunner, cookies, settings, credentials, env, client);
 
         var status = await provider.FetchStatusAsync(CancellationToken.None);
 

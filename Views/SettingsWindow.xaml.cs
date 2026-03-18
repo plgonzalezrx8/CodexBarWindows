@@ -17,7 +17,9 @@ public partial class SettingsWindow : Window
 
     private void OnSaveCompleted()
     {
-        Dispatcher.Invoke(Close);
+        // Save() is invoked via ICommand from a button click on the UI thread,
+        // so SaveCompleted fires on the UI thread — no need for Dispatcher.Invoke.
+        Close();
     }
 
     protected override void OnClosed(EventArgs e)
