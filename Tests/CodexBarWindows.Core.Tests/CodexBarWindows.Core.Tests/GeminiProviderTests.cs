@@ -107,6 +107,50 @@ public class GeminiProviderTests
         Assert.Contains("Pro: 60.0% used", status.TooltipText);
     }
 
+    [Fact]
+    public async Task Refreshes_expired_token_using_gemini_cli_install_layout()
+    {
+        using var paths = new TestAppDataPaths();
+        var settings = new SettingsService(paths);
+        settings.CurrentSettings.EnabledProviders["gemini"] = true;
+        var env = CreateGeminiEnvironment(paths);
+        var geminiDir = Path.Combine(env.GetFolderPath(Environment.SpecialFolder.UserProfile), ".gemini");
+        await File.WriteAllTextAsync(
+            Path.Combine(geminiDir, "oauth_creds.json"),
+            """{"access_token":"expired","refresh_token":"refresh","expiry_date":0}""");
+
+        var installRoot = Path.Combine(paths.AppDataDirectory, "nodejs");
+        var oauthDir = Path.Combine(installRoot, "node_modules", "@google", ".gemini-cli-test", "node_modules", "@google", "gemini-cli-core", "dist", "src", "code_assist");
+        Directory.CreateDirectory(oauthDir);
+        await File.WriteAllTextAsync(
+            Path.Combine(oauthDir, "oauth2.js"),
+            """
+            const OAUTH_CLIENT_ID = "client";
+            const OAUTH_CLIENT_SECRET = "secret";
+            """);
+        env.Variables["PATH"] = installRoot;
+
+        var requests = new List<string>();
+        var client = new HttpClient(new StubHttpMessageHandler(request =>
+        {
+            requests.Add(request.RequestUri!.AbsoluteUri);
+            if (request.RequestUri.AbsoluteUri.Contains("oauth2.googleapis.com", StringComparison.OrdinalIgnoreCase))
+            {
+                return Json("""{"access_token":"fresh","expires_in":3600}""");
+            }
+
+            return Json("""{"buckets":[{"modelId":"gemini-2.5-pro","remainingFraction":0.4}]}""");
+        }));
+
+        var provider = new GeminiProvider(settings, env, client);
+
+        var status = await provider.FetchStatusAsync(CancellationToken.None);
+
+        Assert.False(status.IsError);
+        Assert.Contains(requests, uri => uri.Contains("oauth2.googleapis.com", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("Pro: 60.0% used", status.TooltipText);
+    }
+
     private static FakeEnvironmentService CreateGeminiEnvironment(TestAppDataPaths paths)
     {
         var env = new FakeEnvironmentService();

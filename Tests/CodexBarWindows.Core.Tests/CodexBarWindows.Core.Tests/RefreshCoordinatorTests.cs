@@ -126,4 +126,39 @@ public class RefreshCoordinatorTests
         Assert.Equal("Recovered", third.Statuses.Single().TooltipText);
         Assert.False(second.Statuses.Single().TooltipText.Contains("Recovered", StringComparison.Ordinal));
     }
+
+    [Fact]
+    public async Task Settings_change_resets_failure_tracking_so_provider_is_retried()
+    {
+        using var paths = new TestAppDataPaths();
+        var settings = new SettingsService(paths);
+        var coordinator = new RefreshCoordinator(settings);
+        var provider = new FakeProvider(
+            "codex",
+            "Codex",
+            () => throw new InvalidOperationException("boom"),
+            // Second entry won't be consumed because call 2 is paused (skip cycle)
+            () => Task.FromResult(new ProviderUsageStatus
+            {
+                ProviderId = "codex",
+                ProviderName = "Codex",
+                TooltipText = "Recovered after reset"
+            }));
+
+        // First call fails, setting skip cycles
+        var first = await coordinator.RefreshAsync([provider], CancellationToken.None);
+        Assert.True(first.Statuses.Single().IsError);
+
+        // Without reset, second call would be paused (provider lambda not invoked)
+        var paused = await coordinator.RefreshAsync([provider], CancellationToken.None);
+        Assert.Contains("Paused", paused.Statuses.Single().TooltipText);
+
+        // Simulate settings save — should clear skip cycles
+        settings.SaveSettings();
+
+        // Now the provider should be retried immediately (consumes second entry)
+        var afterReset = await coordinator.RefreshAsync([provider], CancellationToken.None);
+        Assert.False(afterReset.Statuses.Single().IsError);
+        Assert.Equal("Recovered after reset", afterReset.Statuses.Single().TooltipText);
+    }
 }

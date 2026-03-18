@@ -180,6 +180,8 @@ public class SettingsViewModel : INotifyPropertyChanged
     public ICommand SaveCommand { get; }
     public ICommand ResetDefaultsCommand { get; }
 
+    public event Action? SaveCompleted;
+
     // ── Constructor ─────────────────────────────────────────────────
 
     public SettingsViewModel(SettingsService settingsService, IStartupRegistration startupRegistration)
@@ -294,6 +296,7 @@ public class SettingsViewModel : INotifyPropertyChanged
         s.DisableCredentialAccess = DisableCredentialAccess;
 
         _settingsService.SaveSettings();
+        SaveCompleted?.Invoke();
     }
 
     private void UpdateRegistryStartup(bool enable)
