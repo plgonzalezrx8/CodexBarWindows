@@ -56,6 +56,7 @@ public static class AppHostFactory
                         sp.GetRequiredService<IBrowserCookieSource>(),
                         sp.GetRequiredService<SettingsService>(),
                         sp.GetRequiredService<ICredentialStore>(),
+                        sp.GetRequiredService<IEnvironmentService>(),
                         CreateDefaultHttpClient()));
                 services.AddTransient<IProviderProbe, CursorProvider>(sp =>
                     new CursorProvider(

@@ -142,6 +142,58 @@ public class AntigravityProviderTests
         Assert.Equal(0.8, status.SessionProgress, 3);
     }
 
+    [Fact]
+    public async Task FetchStatusAsync_prefers_the_port_that_answers_the_unleash_probe()
+    {
+        using var paths = new TestAppDataPaths();
+        var settings = new SettingsService(paths);
+        var commandRunner = new FakeCommandRunner
+        {
+            Handler = (_, _, _, _) => new CommandResult(
+                0,
+                """
+                ProcessId : 1234
+                CommandLine : C:\Program Files\Antigravity\language_server_windows.exe --csrf_token token-789 --api_server_port 1111 --extension_server_port 2222
+                """,
+                string.Empty)
+        };
+
+        var client = new HttpClient(new StubHttpMessageHandler(request =>
+        {
+            var port = request.RequestUri!.Port;
+            return request.RequestUri.AbsolutePath switch
+            {
+                "/exa.language_server_pb.LanguageServerService/GetUnleashData" when port == 1111 => new HttpResponseMessage(HttpStatusCode.NotFound),
+                "/exa.language_server_pb.LanguageServerService/GetUnleashData" when port == 2222 => Json("""{"code":0}"""),
+                "/exa.language_server_pb.LanguageServerService/GetUserStatus" when port == 2222 => Json("""
+                    {
+                      "code": 0,
+                      "userStatus": {
+                        "cascadeModelConfigData": {
+                          "clientModelConfigs": [
+                            {
+                              "label": "Flash",
+                              "modelOrAlias": { "model": "flash" },
+                              "quotaInfo": { "remainingFraction": 0.2 }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                    """),
+                _ => throw new InvalidOperationException($"Unexpected request: {port} {request.RequestUri.AbsolutePath}")
+            };
+        }));
+
+        var provider = new AntigravityProvider(commandRunner, settings, client);
+
+        var status = await provider.FetchStatusAsync(CancellationToken.None);
+
+        Assert.False(status.IsError);
+        Assert.Contains("Flash: 80.0% used", status.TooltipText);
+        Assert.Equal(0.8, status.SessionProgress, 3);
+    }
+
     private static HttpResponseMessage Json(string json) =>
         new(HttpStatusCode.OK)
         {

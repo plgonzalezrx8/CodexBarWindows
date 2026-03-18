@@ -25,6 +25,7 @@ public class AntigravityProvider : IProviderProbe
     private readonly SettingsService _settings;
     private readonly HttpClient _apiClient;
 
+    private const string GetUnleashDataPath = "/exa.language_server_pb.LanguageServerService/GetUnleashData";
     private const string GetUserStatusPath   = "/exa.language_server_pb.LanguageServerService/GetUserStatus";
     private const string GetModelConfigPath   = "/exa.language_server_pb.LanguageServerService/GetCommandModelConfigs";
     private static readonly string[] ProcessNames = ["language_server_windows", "language_server"];
@@ -127,15 +128,14 @@ public class AntigravityProvider : IProviderProbe
         if (string.IsNullOrEmpty(csrfToken))
             return null;
 
-        // Extract API port (try --api_server_port first, then common ports)
-        var portStr = ExtractFlag("--api_server_port", commandLine)
-                   ?? ExtractFlag("--extension_server_port", commandLine);
+        var candidatePorts = GetCandidatePorts(commandLine);
+        if (candidatePorts.Count == 0)
+        {
+            return null;
+        }
 
-        if (int.TryParse(portStr, out var port))
-            return new ProcessInfo(port, csrfToken);
-
-        // Try netstat to find listening ports for the process
-        return null;
+        var port = await FindWorkingPort(candidatePorts, csrfToken, ct);
+        return new ProcessInfo(port, csrfToken);
     }
 
     private static string? ExtractFlag(string flag, string commandLine)
@@ -143,6 +143,58 @@ public class AntigravityProvider : IProviderProbe
         var pattern = $@"{Regex.Escape(flag)}[=\s]+(\S+)";
         var match = Regex.Match(commandLine, pattern, RegexOptions.IgnoreCase);
         return match.Success ? match.Groups[1].Value : null;
+    }
+
+    private static List<int> GetCandidatePorts(string commandLine)
+    {
+        var ports = new List<int>();
+        AddCandidatePort(ports, ExtractFlag("--api_server_port", commandLine));
+        AddCandidatePort(ports, ExtractFlag("--extension_server_port", commandLine));
+        return ports;
+    }
+
+    private static void AddCandidatePort(List<int> ports, string? portValue)
+    {
+        if (!int.TryParse(portValue, out var port))
+        {
+            return;
+        }
+
+        if (!ports.Contains(port))
+        {
+            ports.Add(port);
+        }
+    }
+
+    private async Task<int> FindWorkingPort(IReadOnlyList<int> candidatePorts, string csrfToken, CancellationToken ct)
+    {
+        foreach (var port in candidatePorts)
+        {
+            if (await CanProbePortAsync(port, csrfToken, ct))
+            {
+                return port;
+            }
+        }
+
+        // Legacy fallback: keep the first candidate rather than failing hard.
+        return candidatePorts[0];
+    }
+
+    private async Task<bool> CanProbePortAsync(int port, string csrfToken, CancellationToken ct)
+    {
+        try
+        {
+            _ = await MakeApiRequest(port, csrfToken, GetUnleashDataPath, UnleashRequestBody(), ct);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     // ── API Requests ────────────────────────────────────────────────
@@ -167,6 +219,10 @@ public class AntigravityProvider : IProviderProbe
                 response.EnsureSuccessStatusCode();
                 return await response.Content.ReadAsStringAsync(ct);
             }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
             catch when (scheme == "https")
             {
                 // Fall through to HTTP
@@ -184,6 +240,25 @@ public class AntigravityProvider : IProviderProbe
             extensionName = "antigravity",
             ideVersion = "unknown",
             locale = "en"
+        }
+    };
+
+    private static object UnleashRequestBody() => new
+    {
+        context = new
+        {
+            properties = new
+            {
+                devMode = "false",
+                extensionVersion = "unknown",
+                hasAnthropicModelAccess = "true",
+                ide = "antigravity",
+                ideVersion = "unknown",
+                installationId = "codexbar",
+                language = "UNSPECIFIED",
+                os = "windows",
+                requestedModelId = "MODEL_UNSPECIFIED"
+            }
         }
     };
 
