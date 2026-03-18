@@ -112,12 +112,18 @@ public class BrowserCookieService : IBrowserCookieSource
         var encryptionKey = GetChromiumEncryptionKey(browser);
         if (encryptionKey == null) return null;
 
-        var resultByKey = new Dictionary<string, BrowserCookie>(StringComparer.Ordinal);
+        // Try each profile independently; return cookies from the first profile
+        // that has any matching cookies to avoid mixing sessions across profiles.
         foreach (var dbPath in dbPaths)
         {
             try
             {
-                ReadChromiumCookiesFromDb(dbPath, domain, encryptionKey, resultByKey);
+                var profileCookies = new Dictionary<string, BrowserCookie>(StringComparer.Ordinal);
+                ReadChromiumCookiesFromDb(dbPath, domain, encryptionKey, profileCookies);
+                if (profileCookies.Count > 0)
+                {
+                    return profileCookies.Values.ToList();
+                }
             }
             catch (Exception ex)
             {
@@ -125,7 +131,7 @@ public class BrowserCookieService : IBrowserCookieSource
             }
         }
 
-        return resultByKey.Count > 0 ? resultByKey.Values.ToList() : null;
+        return null;
     }
 
     private static void ReadChromiumCookiesFromDb(

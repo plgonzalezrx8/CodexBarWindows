@@ -153,7 +153,7 @@ public class AntigravityProviderTests
                 0,
                 """
                 ProcessId : 1234
-                CommandLine : C:\Program Files\Antigravity\language_server_windows.exe --csrf_token token-789 --extension_server_port 1111 --api_server_port 2222
+                CommandLine : C:\Program Files\Antigravity\language_server_windows.exe --csrf_token token-789 --api_server_port 1111 --extension_server_port 2222
                 """,
                 string.Empty)
         };

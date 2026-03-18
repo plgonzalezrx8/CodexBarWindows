@@ -148,8 +148,8 @@ public class AntigravityProvider : IProviderProbe
     private static List<int> GetCandidatePorts(string commandLine)
     {
         var ports = new List<int>();
-        AddCandidatePort(ports, ExtractFlag("--extension_server_port", commandLine));
         AddCandidatePort(ports, ExtractFlag("--api_server_port", commandLine));
+        AddCandidatePort(ports, ExtractFlag("--extension_server_port", commandLine));
         return ports;
     }
 
@@ -218,6 +218,10 @@ public class AntigravityProvider : IProviderProbe
                 using var response = await _apiClient.SendAsync(request, ct);
                 response.EnsureSuccessStatusCode();
                 return await response.Content.ReadAsStringAsync(ct);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch when (scheme == "https")
             {

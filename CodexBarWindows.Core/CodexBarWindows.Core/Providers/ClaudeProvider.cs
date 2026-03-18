@@ -17,9 +17,10 @@ namespace CodexBarWindows.Providers;
 /// and falls back to claude.ai browser cookies or a manual sessionKey cookie.
 ///
 /// Auth priority:
-///   1. Claude OAuth file
+///   1. Cached cookie header (from credential store)
 ///   2. Browser cookies (for Claude web dashboard)
 ///   3. Manual sessionKey cookie
+///   4. Claude OAuth file (~/.claude/.credentials.json)
 /// </summary>
 public class ClaudeProvider : IProviderProbe
 {
@@ -162,14 +163,22 @@ public class ClaudeProvider : IProviderProbe
         }
 
         var credentials = LoadOAuthCredentials(credentialsPath);
-        if (credentials.ExpiresAt.HasValue && credentials.ExpiresAt.Value <= DateTimeOffset.UtcNow)
+        var isExpired = credentials.ExpiresAt.HasValue && credentials.ExpiresAt.Value <= DateTimeOffset.UtcNow;
+        var isMissingExpiry = !credentials.ExpiresAt.HasValue;
+        if (isExpired || isMissingExpiry)
         {
             if (string.IsNullOrWhiteSpace(credentials.RefreshToken))
             {
-                throw new ClaudeAuthException("Claude OAuth token expired and no refresh token was found. Run `claude` to re-authenticate.");
+                if (isExpired)
+                {
+                    throw new ClaudeAuthException("Claude OAuth token expired and no refresh token was found. Run `claude` to re-authenticate.");
+                }
+                // No expiry and no refresh token — try the access token as-is.
             }
-
-            credentials = await RefreshOAuthCredentialsAsync(credentialsPath, credentials, cancellationToken);
+            else
+            {
+                credentials = await RefreshOAuthCredentialsAsync(credentialsPath, credentials, cancellationToken);
+            }
         }
 
         return await FetchWithOAuthAccessTokenAsync(credentials, cancellationToken);
@@ -346,21 +355,30 @@ public class ClaudeProvider : IProviderProbe
     {
         try
         {
-            var file = new ClaudeOAuthCredentialsFile
+            // Read-modify-write: preserve any other top-level keys in the file.
+            var dict = new Dictionary<string, JsonElement>();
+            if (File.Exists(credentialsPath))
             {
-                ClaudeAiOauth = new ClaudeOAuthCredentialsData
-                {
-                    AccessToken = credentials.AccessToken,
-                    RefreshToken = credentials.RefreshToken,
-                    ExpiresAt = credentials.ExpiresAt.HasValue
-                        ? credentials.ExpiresAt.Value.ToUnixTimeMilliseconds()
-                        : null,
-                    Scopes = credentials.Scopes.ToList(),
-                    RateLimitTier = credentials.RateLimitTier
-                }
+                var existingJson = File.ReadAllText(credentialsPath);
+                dict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(existingJson) ?? [];
+            }
+
+            var updatedOAuth = new ClaudeOAuthCredentialsData
+            {
+                AccessToken = credentials.AccessToken,
+                RefreshToken = credentials.RefreshToken,
+                ExpiresAt = credentials.ExpiresAt.HasValue
+                    ? credentials.ExpiresAt.Value.ToUnixTimeMilliseconds()
+                    : null,
+                Scopes = credentials.Scopes.ToList(),
+                RateLimitTier = credentials.RateLimitTier
             };
 
-            File.WriteAllText(credentialsPath, JsonSerializer.Serialize(file, JsonOptions));
+            var oauthJson = JsonSerializer.Serialize(updatedOAuth, JsonOptions);
+            dict["claudeAiOauth"] = JsonDocument.Parse(oauthJson).RootElement;
+
+            var mergedJson = JsonSerializer.Serialize(dict, JsonOptions);
+            File.WriteAllText(credentialsPath, mergedJson);
         }
         catch
         {
