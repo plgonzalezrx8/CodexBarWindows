@@ -132,6 +132,10 @@ public class ProviderFlowTests
         using var paths = new TestAppDataPaths();
         var settings = new SettingsService(paths);
         var commandRunner = new FakeCommandRunner();
+        var env = new FakeEnvironmentService();
+        var homeDir = Path.Combine(paths.AppDataDirectory, "home");
+        Directory.CreateDirectory(homeDir);
+        env.Folders[Environment.SpecialFolder.UserProfile] = homeDir;
         var cookies = new FakeCookieSource { CookieHeader = "sessionKey=browser-cookie" };
         var credentials = new FakeCredentialStore();
         credentials.CacheCookieHeader("claude", "sessionKey=expired-cookie", "test");
@@ -157,8 +161,6 @@ public class ProviderFlowTests
                 };
         }));
 
-        var env = new FakeEnvironmentService();
-        env.Folders[Environment.SpecialFolder.UserProfile] = Path.Combine(Path.GetTempPath(), "codexbar-test-nonexistent");
         var provider = new ClaudeProvider(commandRunner, cookies, settings, credentials, env, client);
 
         var status = await provider.FetchStatusAsync(CancellationToken.None);

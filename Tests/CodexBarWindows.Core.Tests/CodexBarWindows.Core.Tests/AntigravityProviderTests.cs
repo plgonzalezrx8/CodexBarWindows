@@ -17,7 +17,10 @@ public class AntigravityProviderTests
         {
             Handler = (_, _, _, _) => new CommandResult(
                 0,
-                "1234|C:\\Program Files\\Antigravity\\language_server_windows.exe --csrf_token token-123 --api_server_port 4567",
+                """
+                ProcessId : 1234
+                CommandLine : C:\Program Files\Antigravity\language_server_windows.exe --csrf_token token-123 --api_server_port 4567
+                """,
                 string.Empty)
         };
 
@@ -99,7 +102,10 @@ public class AntigravityProviderTests
         {
             Handler = (_, _, _, _) => new CommandResult(
                 0,
-                "1234|C:\\Program Files\\Antigravity\\language_server_windows.exe --csrf_token token-456 --api_server_port 4567",
+                """
+                ProcessId : 1234
+                CommandLine : C:\Program Files\Antigravity\language_server_windows.exe --csrf_token token-456 --api_server_port 4567
+                """,
                 string.Empty)
         };
 
@@ -136,52 +142,56 @@ public class AntigravityProviderTests
         Assert.Equal(0.8, status.SessionProgress, 3);
     }
 
-    [Theory]
-    [InlineData(
-        @"C:\Program Files\Antigravity\language_server_windows.exe --csrf_token abc123 --api_server_port 4567",
-        4567, "abc123")]
-    [InlineData(
-        @"C:\Antigravity\bin\language_server_windows.exe --app_data_dir antigravity --csrf_token tok99 --api_server_port 9999",
-        9999, "tok99")]
-    public void TryParseCommandLine_extracts_port_and_csrf_from_antigravity_processes(
-        string commandLine, int expectedPort, string expectedToken)
-    {
-        var result = AntigravityProvider.TryParseCommandLine(commandLine);
-
-        Assert.NotNull(result);
-        Assert.Equal(expectedPort, result.Port);
-        Assert.Equal(expectedToken, result.CsrfToken);
-    }
-
     [Fact]
-    public void TryParseCommandLine_returns_zero_port_when_random_port_used()
+    public async Task FetchStatusAsync_prefers_the_port_that_answers_the_unleash_probe()
     {
-        var result = AntigravityProvider.TryParseCommandLine(
-            @"C:\Antigravity\bin\language_server_windows.exe --csrf_token tok --random_port --app_data_dir antigravity");
+        using var paths = new TestAppDataPaths();
+        var settings = new SettingsService(paths);
+        var commandRunner = new FakeCommandRunner
+        {
+            Handler = (_, _, _, _) => new CommandResult(
+                0,
+                """
+                ProcessId : 1234
+                CommandLine : C:\Program Files\Antigravity\language_server_windows.exe --csrf_token token-789 --api_server_port 1111 --extension_server_port 2222
+                """,
+                string.Empty)
+        };
 
-        Assert.NotNull(result);
-        Assert.Equal(0, result.Port);
-        Assert.Equal("tok", result.CsrfToken);
-    }
+        var client = new HttpClient(new StubHttpMessageHandler(request =>
+        {
+            var port = request.RequestUri!.Port;
+            return request.RequestUri.AbsolutePath switch
+            {
+                "/exa.language_server_pb.LanguageServerService/GetUnleashData" when port == 1111 => new HttpResponseMessage(HttpStatusCode.NotFound),
+                "/exa.language_server_pb.LanguageServerService/GetUnleashData" when port == 2222 => Json("""{"code":0}"""),
+                "/exa.language_server_pb.LanguageServerService/GetUserStatus" when port == 2222 => Json("""
+                    {
+                      "code": 0,
+                      "userStatus": {
+                        "cascadeModelConfigData": {
+                          "clientModelConfigs": [
+                            {
+                              "label": "Flash",
+                              "modelOrAlias": { "model": "flash" },
+                              "quotaInfo": { "remainingFraction": 0.2 }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                    """),
+                _ => throw new InvalidOperationException($"Unexpected request: {port} {request.RequestUri.AbsolutePath}")
+            };
+        }));
 
-    [Theory]
-    [InlineData("notepad.exe --csrf_token abc --api_server_port 1234")]
-    [InlineData(@"C:\Antigravity\language_server_windows.exe --api_server_port 4567")]
-    [InlineData(@"C:\Windsurf\extensions\language_server.exe --csrf_token tok --extension_server_port 9999")]
-    public void TryParseCommandLine_rejects_non_antigravity_or_incomplete_commands(string commandLine)
-    {
-        var result = AntigravityProvider.TryParseCommandLine(commandLine);
-        Assert.Null(result);
-    }
+        var provider = new AntigravityProvider(commandRunner, settings, client);
 
-    [Theory]
-    [InlineData(@"--app_data_dir antigravity --csrf_token tok", true)]
-    [InlineData(@"c:\programs\antigravity\bin\lang.exe", true)]
-    [InlineData(@"c:\programs\windsurf\bin\lang.exe", false)]
-    [InlineData(@"--app_data_dir codeium --csrf_token tok", false)]
-    public void IsAntigravityProcess_filters_correctly(string lowerCmd, bool expected)
-    {
-        Assert.Equal(expected, AntigravityProvider.IsAntigravityProcess(lowerCmd));
+        var status = await provider.FetchStatusAsync(CancellationToken.None);
+
+        Assert.False(status.IsError);
+        Assert.Contains("Flash: 80.0% used", status.TooltipText);
+        Assert.Equal(0.8, status.SessionProgress, 3);
     }
 
     private static HttpResponseMessage Json(string json) =>
