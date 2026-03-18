@@ -342,21 +342,73 @@ public class GeminiProvider : IProviderProbe
         var appData = _environmentService.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         var localAppData = _environmentService.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
 
-        var searchPaths = new[]
+        var searchRoots = new List<string>
         {
-            Path.Combine(appData, @"npm\node_modules\@google\gemini-cli\node_modules\@google\gemini-cli-core\dist\src\code_assist\oauth2.js"),
-            Path.Combine(localAppData, @"bun\node_modules\@google\gemini-cli\node_modules\@google\gemini-cli-core\dist\src\code_assist\oauth2.js"),
+            Path.Combine(appData, "npm"),
+            Path.Combine(localAppData, "npm"),
+            Path.Combine(localAppData, "bun")
         };
 
-        foreach (var path in searchPaths)
+        var pathValue = _environmentService.GetEnvironmentVariable("PATH");
+        if (!string.IsNullOrWhiteSpace(pathValue))
         {
-            if (!File.Exists(path)) continue;
-            var content = File.ReadAllText(path);
-            var result = ParseOAuthFromJs(content);
-            if (result.HasValue) return result.Value;
+            foreach (var entry in pathValue.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (Directory.Exists(entry))
+                {
+                    searchRoots.Add(entry);
+                }
+            }
+        }
+
+        foreach (var root in searchRoots.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            foreach (var path in EnumerateGeminiOAuthCandidates(root))
+            {
+                var content = File.ReadAllText(path);
+                var result = ParseOAuthFromJs(content);
+                if (result.HasValue) return result.Value;
+            }
         }
 
         throw new Exception("Could not find Gemini OAuth client credentials. Ensure the Gemini CLI is installed and you have logged in with `gemini`.");
+    }
+
+    private static IEnumerable<string> EnumerateGeminiOAuthCandidates(string root)
+    {
+        var googleRoot = Path.Combine(root, "node_modules", "@google");
+        if (!Directory.Exists(googleRoot))
+        {
+            yield break;
+        }
+
+        var packageDirectories = new List<string>();
+        var directPackage = Path.Combine(googleRoot, "gemini-cli");
+        if (Directory.Exists(directPackage))
+        {
+            packageDirectories.Add(directPackage);
+        }
+
+        packageDirectories.AddRange(Directory.GetDirectories(googleRoot, "gemini-cli*", SearchOption.TopDirectoryOnly));
+        packageDirectories.AddRange(Directory.GetDirectories(googleRoot, ".gemini-cli-*", SearchOption.TopDirectoryOnly));
+
+        foreach (var packageDirectory in packageDirectories.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var candidate = Path.Combine(
+                packageDirectory,
+                "node_modules",
+                "@google",
+                "gemini-cli-core",
+                "dist",
+                "src",
+                "code_assist",
+                "oauth2.js");
+
+            if (File.Exists(candidate))
+            {
+                yield return candidate;
+            }
+        }
     }
 
     private static (string ClientId, string ClientSecret)? ParseOAuthFromJs(string content)

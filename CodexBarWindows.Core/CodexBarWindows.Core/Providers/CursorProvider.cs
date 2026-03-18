@@ -9,7 +9,7 @@ using CodexBarWindows.Services;
 namespace CodexBarWindows.Providers;
 
 /// <summary>
-/// Cursor provider — reads session cookies from Chrome/Edge to authenticate
+/// Cursor provider — reads session cookies from Chrome/Edge/Brave to authenticate
 /// against cursor.com's usage-summary API.
 ///
 /// API endpoints:
@@ -98,7 +98,7 @@ public class CursorProvider : IProviderProbe
             }
         }
 
-        return MakeError("No Cursor session found. Log in to cursor.com in Chrome or Edge.");
+        return MakeError("No Cursor session found. Log in to cursor.com in Chrome, Edge, or Brave.");
     }
 
     // ── HTTP Fetch ──────────────────────────────────────────────────

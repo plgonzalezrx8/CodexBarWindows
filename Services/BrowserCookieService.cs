@@ -8,7 +8,7 @@ using Microsoft.Data.Sqlite;
 namespace CodexBarWindows.Services;
 
 /// <summary>
-/// Extracts cookies from Chromium-based browsers (Chrome, Edge) on Windows
+/// Extracts cookies from Chromium-based browsers (Chrome, Edge, Brave) on Windows
 /// by reading the SQLite Cookies database and decrypting values via DPAPI +
 /// AES-256-GCM (Chromium v80+ encryption scheme).
 ///
@@ -93,20 +93,47 @@ public class BrowserCookieService : IBrowserCookieSource
     /// </summary>
     public bool IsBrowserAvailable(Browser browser)
     {
-        var dbPath = GetCookieDbPath(browser);
-        return dbPath != null && File.Exists(dbPath);
+        if (browser == Browser.Firefox)
+        {
+            var profileDir = GetFirefoxDefaultProfileDir();
+            return profileDir != null && File.Exists(Path.Combine(profileDir, "cookies.sqlite"));
+        }
+
+        return EnumerateChromiumCookieDbPaths(browser).Any();
     }
 
     // ── Chromium Cookies (Chrome / Edge / Brave) ────────────────────
 
     private List<BrowserCookie>? ReadChromiumCookies(Browser browser, string domain)
     {
-        var dbPath = GetCookieDbPath(browser);
-        if (dbPath == null || !File.Exists(dbPath)) return null;
+        var dbPaths = EnumerateChromiumCookieDbPaths(browser).ToList();
+        if (dbPaths.Count == 0) return null;
 
         var encryptionKey = GetChromiumEncryptionKey(browser);
         if (encryptionKey == null) return null;
 
+        var resultByKey = new Dictionary<string, BrowserCookie>(StringComparer.Ordinal);
+        foreach (var dbPath in dbPaths)
+        {
+            try
+            {
+                ReadChromiumCookiesFromDb(dbPath, domain, encryptionKey, resultByKey);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[BrowserCookieService] Failed reading {browser} cookies from {dbPath}: {ex.Message}");
+            }
+        }
+
+        return resultByKey.Count > 0 ? resultByKey.Values.ToList() : null;
+    }
+
+    private static void ReadChromiumCookiesFromDb(
+        string dbPath,
+        string domain,
+        byte[] encryptionKey,
+        Dictionary<string, BrowserCookie> resultByKey)
+    {
         // Chromium locks the cookie DB — copy to a temp file to avoid locking issues.
         var tempDb = Path.GetTempFileName();
         try
@@ -121,8 +148,6 @@ public class BrowserCookieService : IBrowserCookieSource
             var shmPath = dbPath + "-shm";
             if (File.Exists(shmPath))
                 File.Copy(shmPath, tempDb + "-shm", overwrite: true);
-
-            var result = new List<BrowserCookie>();
 
             using var connection = new SqliteConnection($"Data Source={tempDb};Mode=ReadOnly");
             connection.Open();
@@ -142,19 +167,25 @@ public class BrowserCookieService : IBrowserCookieSource
                 var decryptedValue = DecryptChromiumCookieValue(encryptedValue, encryptionKey);
                 if (decryptedValue == null) continue;
 
-                result.Add(new BrowserCookie
+                var host = reader.GetString(0);
+                var name = reader.GetString(1);
+                var path = reader.GetString(3);
+
+                var cookie = new BrowserCookie
                 {
-                    Host = reader.GetString(0),
-                    Name = reader.GetString(1),
+                    Host = host,
+                    Name = name,
                     Value = decryptedValue,
-                    Path = reader.GetString(3),
+                    Path = path,
                     ExpiresUtc = reader.GetInt64(4),
                     IsSecure = reader.GetBoolean(5),
                     IsHttpOnly = reader.GetBoolean(6)
-                });
-            }
+                };
 
-            return result;
+                // Keep the last value encountered for the same logical cookie.
+                var key = $"{host}\n{name}\n{path}";
+                resultByKey[key] = cookie;
+            }
         }
         finally
         {
@@ -287,34 +318,75 @@ public class BrowserCookieService : IBrowserCookieSource
 
     // ── Path Helpers ────────────────────────────────────────────────
 
-    private static string? GetCookieDbPath(Browser browser) => browser switch
+    private static readonly string[] ChromiumCookieRelativePaths =
+    [
+        Path.Combine("Network", "Cookies"),
+        "Cookies"
+    ];
+
+    private static IEnumerable<string> EnumerateChromiumCookieDbPaths(Browser browser)
+    {
+        var userDataDir = GetChromiumUserDataDir(browser);
+        if (string.IsNullOrWhiteSpace(userDataDir) || !Directory.Exists(userDataDir))
+        {
+            yield break;
+        }
+
+        var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var profileDir in EnumerateChromiumProfileDirs(userDataDir))
+        {
+            foreach (var relativePath in ChromiumCookieRelativePaths)
+            {
+                var dbPath = Path.Combine(profileDir, relativePath);
+                if (File.Exists(dbPath) && seenPaths.Add(dbPath))
+                {
+                    yield return dbPath;
+                }
+            }
+        }
+    }
+
+    private static IEnumerable<string> EnumerateChromiumProfileDirs(string userDataDir)
+    {
+        var defaultDir = Path.Combine(userDataDir, "Default");
+        if (Directory.Exists(defaultDir))
+        {
+            yield return defaultDir;
+        }
+
+        foreach (var profileDir in Directory
+            .GetDirectories(userDataDir, "Profile *")
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+        {
+            yield return profileDir;
+        }
+
+        var guestDir = Path.Combine(userDataDir, "Guest Profile");
+        if (Directory.Exists(guestDir))
+        {
+            yield return guestDir;
+        }
+    }
+
+    private static string? GetChromiumUserDataDir(Browser browser) => browser switch
     {
         Browser.Chrome => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            @"Google\Chrome\User Data\Default\Cookies"),
+            @"Google\Chrome\User Data"),
         Browser.Edge => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            @"Microsoft\Edge\User Data\Default\Cookies"),
+            @"Microsoft\Edge\User Data"),
         Browser.Brave => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            @"BraveSoftware\Brave-Browser\User Data\Default\Cookies"),
-        Browser.Firefox => null, // Firefox uses a different path structure — handled separately.
+            @"BraveSoftware\Brave-Browser\User Data"),
         _ => null
     };
 
-    private static string? GetLocalStatePath(Browser browser) => browser switch
+    private static string? GetLocalStatePath(Browser browser)
     {
-        Browser.Chrome => Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            @"Google\Chrome\User Data\Local State"),
-        Browser.Edge => Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            @"Microsoft\Edge\User Data\Local State"),
-        Browser.Brave => Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            @"BraveSoftware\Brave-Browser\User Data\Local State"),
-        _ => null
-    };
+        var userDataDir = GetChromiumUserDataDir(browser);
+        return userDataDir == null ? null : Path.Combine(userDataDir, "Local State");
+    }
 
     private static string? GetFirefoxDefaultProfileDir()
     {
