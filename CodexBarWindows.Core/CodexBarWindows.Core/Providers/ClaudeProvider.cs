@@ -1,7 +1,9 @@
 using System;
+using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -26,7 +28,14 @@ public class ClaudeProvider : IProviderProbe
     private readonly IBrowserCookieSource _cookieSource;
     private readonly SettingsService _settings;
     private readonly ICredentialStore _credentialStore;
+    private readonly IEnvironmentService _environmentService;
     private readonly HttpClient _httpClient;
+
+    private const string OAuthUsageEndpoint = "https://api.anthropic.com/api/oauth/usage";
+    private const string OAuthTokenRefreshEndpoint = "https://platform.claude.com/v1/oauth/token";
+    private const string DefaultOAuthClientId = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+    private const string OAuthBetaHeader = "oauth-2025-04-20";
+    private const string CredentialsRelPath = @".claude\.credentials.json";
 
     public string ProviderId => "claude";
     public string ProviderName => "Claude";
@@ -37,17 +46,32 @@ public class ClaudeProvider : IProviderProbe
         IBrowserCookieSource cookieSource,
         SettingsService settings,
         ICredentialStore credentialStore,
+        IEnvironmentService environmentService,
         HttpClient httpClient)
     {
         _commandRunner = commandRunner;
         _cookieSource = cookieSource;
         _settings = settings;
         _credentialStore = credentialStore;
+        _environmentService = environmentService;
         _httpClient = httpClient;
     }
 
     public async Task<ProviderUsageStatus> FetchStatusAsync(CancellationToken cancellationToken)
     {
+        // 1. Try OAuth credentials from Claude CLI (~/.claude/.credentials.json)
+        try
+        {
+            var oauthResult = await TryFetchViaOAuth(cancellationToken);
+            if (oauthResult != null)
+                return oauthResult;
+        }
+        catch (Exception)
+        {
+            // Fall through to cookie-based auth
+        }
+
+        // 2. Try cookie-based auth (cached, browser import, manual)
         var cached = _credentialStore.GetCachedCookieHeader("claude");
         if (cached != null && !string.IsNullOrWhiteSpace(cached.CookieHeader))
         {
@@ -93,10 +117,194 @@ public class ClaudeProvider : IProviderProbe
 
         if (_commandRunner.CommandExists("claude"))
         {
-            return MakeError("Claude CLI is installed, but Windows usage fetching currently relies on a claude.ai session. Log in to claude.ai in Chrome or Edge, or save a manual sessionKey cookie.");
+            return MakeError("Claude CLI is installed but no valid credentials found. Run `claude` to authenticate via OAuth, or log in to claude.ai in Chrome or Edge.");
         }
 
-        return MakeError("No Claude session found. Log in to claude.ai in Chrome or Edge.");
+        return MakeError("No Claude session found. Install Claude CLI and run `claude` to authenticate, or log in to claude.ai in Chrome or Edge.");
+    }
+
+    // ── OAuth Credential Flow ───────────────────────────────────────
+
+    private async Task<ProviderUsageStatus?> TryFetchViaOAuth(CancellationToken cancellationToken)
+    {
+        var homeDir = _environmentService.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var creds = LoadOAuthCredentials(homeDir);
+        if (creds == null)
+            return null;
+
+        var accessToken = creds.AccessToken;
+
+        // Refresh if expired
+        if (creds.ExpiresAt.HasValue && creds.ExpiresAt.Value < DateTime.UtcNow)
+        {
+            if (string.IsNullOrEmpty(creds.RefreshToken))
+                return null; // No refresh token — fall through to other methods
+
+            accessToken = await RefreshOAuthToken(creds.RefreshToken, homeDir, cancellationToken);
+        }
+
+        return await FetchOAuthUsage(accessToken, cancellationToken);
+    }
+
+    private async Task<ProviderUsageStatus> FetchOAuthUsage(string accessToken, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, OAuthUsageEndpoint);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        request.Content = new StringContent(string.Empty, Encoding.UTF8, "application/json");
+        request.Headers.TryAddWithoutValidation("anthropic-beta", OAuthBetaHeader);
+        request.Headers.TryAddWithoutValidation("User-Agent", $"claude-code/{DetectClaudeVersion()}");
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        if (response.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            throw new ClaudeAuthException("Claude OAuth token expired or invalid.");
+        }
+
+        response.EnsureSuccessStatusCode();
+
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+        var root = document.RootElement;
+
+        var sessionPercent = ReadUtilization(root, "five_hour");
+        if (!sessionPercent.HasValue)
+            throw new InvalidOperationException("Claude OAuth usage response missing five_hour data.");
+
+        var weeklyPercent = ReadUtilization(root, "seven_day");
+        var opusPercent = ReadUtilization(root, "seven_day_opus") ?? ReadUtilization(root, "seven_day_sonnet");
+
+        var tooltipParts = new List<string> { "Claude (OAuth)" };
+        tooltipParts.Add($"Session: {sessionPercent.Value:F1}% used");
+        if (weeklyPercent.HasValue)
+            tooltipParts.Add($"Weekly: {weeklyPercent.Value:F1}% used");
+        if (opusPercent.HasValue)
+            tooltipParts.Add($"Opus/Sonnet: {opusPercent.Value:F1}% used");
+
+        var sessionReset = ReadReset(root, "five_hour");
+        var weeklyReset = ReadReset(root, "seven_day");
+        if (!string.IsNullOrWhiteSpace(sessionReset))
+            tooltipParts.Add($"Session resets: {sessionReset}");
+        if (!string.IsNullOrWhiteSpace(weeklyReset))
+            tooltipParts.Add($"Weekly resets: {weeklyReset}");
+
+        return new ProviderUsageStatus
+        {
+            ProviderId = "claude",
+            ProviderName = "Claude",
+            SessionProgress = Math.Clamp(sessionPercent.Value / 100.0, 0.0, 1.0),
+            WeeklyProgress = weeklyPercent.HasValue
+                ? Math.Clamp(weeklyPercent.Value / 100.0, 0.0, 1.0)
+                : 0.0,
+            IsError = false,
+            TooltipText = string.Join("\n", tooltipParts)
+        };
+    }
+
+    private async Task<string> RefreshOAuthToken(string refreshToken, string homeDir, CancellationToken cancellationToken)
+    {
+        var body = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["grant_type"] = "refresh_token",
+            ["client_id"] = DefaultOAuthClientId,
+            ["refresh_token"] = refreshToken
+        });
+
+        using var response = await _httpClient.PostAsync(OAuthTokenRefreshEndpoint, body, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadAsStringAsync(cancellationToken);
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        var newAccessToken = root.GetProperty("access_token").GetString()
+            ?? throw new Exception("No access_token in Claude OAuth refresh response");
+
+        // Update stored credentials file
+        UpdateOAuthCredentials(homeDir, root);
+
+        return newAccessToken;
+    }
+
+    private sealed class ClaudeOAuthCreds
+    {
+        public string AccessToken { get; set; } = string.Empty;
+        public string? RefreshToken { get; set; }
+        public DateTime? ExpiresAt { get; set; }
+    }
+
+    private static ClaudeOAuthCreds? LoadOAuthCredentials(string homeDir)
+    {
+        var credsPath = Path.Combine(homeDir, CredentialsRelPath);
+        if (!File.Exists(credsPath)) return null;
+
+        try
+        {
+            var json = File.ReadAllText(credsPath);
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            // Claude CLI stores OAuth under "claudeAiOauth" key
+            if (!root.TryGetProperty("claudeAiOauth", out var oauth))
+                return null;
+
+            var accessToken = oauth.TryGetProperty("accessToken", out var at) ? at.GetString() : null;
+            if (string.IsNullOrWhiteSpace(accessToken))
+                return null;
+
+            string? refreshToken = oauth.TryGetProperty("refreshToken", out var rt) ? rt.GetString() : null;
+
+            DateTime? expiresAt = null;
+            if (oauth.TryGetProperty("expiresAt", out var exp) && exp.ValueKind == JsonValueKind.Number)
+            {
+                var expiryMs = exp.GetDouble();
+                expiresAt = DateTimeOffset.FromUnixTimeMilliseconds((long)expiryMs).UtcDateTime;
+            }
+
+            return new ClaudeOAuthCreds
+            {
+                AccessToken = accessToken!,
+                RefreshToken = refreshToken,
+                ExpiresAt = expiresAt
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static void UpdateOAuthCredentials(string homeDir, JsonElement refreshResponse)
+    {
+        var credsPath = Path.Combine(homeDir, CredentialsRelPath);
+        if (!File.Exists(credsPath)) return;
+
+        try
+        {
+            var existingJson = File.ReadAllText(credsPath);
+            using var existingDoc = JsonDocument.Parse(existingJson);
+            if (!existingDoc.RootElement.TryGetProperty("claudeAiOauth", out var existingOauth))
+                return;
+
+            var oauthDict = JsonSerializer.Deserialize<Dictionary<string, object?>>(existingOauth.GetRawText()) ?? [];
+
+            if (refreshResponse.TryGetProperty("access_token", out var newAt))
+                oauthDict["accessToken"] = newAt.GetString();
+            if (refreshResponse.TryGetProperty("refresh_token", out var newRt))
+                oauthDict["refreshToken"] = newRt.GetString();
+            if (refreshResponse.TryGetProperty("expires_in", out var ei))
+            {
+                var expiresIn = ei.GetDouble();
+                var expiryMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + (long)(expiresIn * 1000);
+                oauthDict["expiresAt"] = expiryMs;
+            }
+
+            var fullDict = JsonSerializer.Deserialize<Dictionary<string, object?>>(existingJson) ?? [];
+            fullDict["claudeAiOauth"] = oauthDict;
+
+            var updatedJson = JsonSerializer.Serialize(fullDict, new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(credsPath, updatedJson);
+        }
+        catch { /* Best effort */ }
     }
 
     private async Task<ProviderUsageStatus> FetchWithCookieHeader(string cookieHeader, CancellationToken cancellationToken)
@@ -399,6 +607,22 @@ public class ClaudeProvider : IProviderProbe
 
     private static string StripAnsiCodes(string text) =>
         Regex.Replace(text, @"\x1B\[[0-9;]*[A-Za-z]", "");
+
+    private string DetectClaudeVersion()
+    {
+        try
+        {
+            var result = _commandRunner.ExecuteCommandAsync("claude", "--version", timeoutMilliseconds: 3000).GetAwaiter().GetResult();
+            if (result.ExitCode == 0 && !string.IsNullOrWhiteSpace(result.Output))
+            {
+                var version = result.Output.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries)[0];
+                if (!string.IsNullOrWhiteSpace(version) && char.IsDigit(version[0]))
+                    return version;
+            }
+        }
+        catch { /* Fall through to default */ }
+        return "2.1.0";
+    }
 
     private static ProviderUsageStatus MakeError(string message) => new()
     {

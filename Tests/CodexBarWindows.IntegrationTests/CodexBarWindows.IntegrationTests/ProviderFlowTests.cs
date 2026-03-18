@@ -157,7 +157,7 @@ public class ProviderFlowTests
                 };
         }));
 
-        var provider = new ClaudeProvider(commandRunner, cookies, settings, credentials, client);
+        var provider = new ClaudeProvider(commandRunner, cookies, settings, credentials, new FakeEnvironmentService(), client);
 
         var status = await provider.FetchStatusAsync(CancellationToken.None);
 

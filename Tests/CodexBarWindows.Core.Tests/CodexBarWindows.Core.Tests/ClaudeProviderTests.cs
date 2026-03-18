@@ -25,7 +25,7 @@ public class ClaudeProviderTests
                 : Json("""[{"uuid":"org_123","name":"Primary","capabilities":["chat"]}]""");
         }));
 
-        var provider = new ClaudeProvider(commandRunner, cookies, settings, credentials, client);
+        var provider = new ClaudeProvider(commandRunner, cookies, settings, credentials, new FakeEnvironmentService(), client);
 
         var status = await provider.FetchStatusAsync(CancellationToken.None);
 
@@ -58,7 +58,7 @@ public class ClaudeProviderTests
                 : Json("""[{"uuid":"org_123","name":"Primary","capabilities":["chat"]}]""");
         }));
 
-        var provider = new ClaudeProvider(commandRunner, cookies, settings, credentials, client);
+        var provider = new ClaudeProvider(commandRunner, cookies, settings, credentials, new FakeEnvironmentService(), client);
 
         var status = await provider.FetchStatusAsync(CancellationToken.None);
 
@@ -75,7 +75,7 @@ public class ClaudeProviderTests
         var commandRunner = new FakeCommandRunner { Exists = true };
         var cookies = new FakeCookieSource { CookieHeader = "foo=bar" };
         var credentials = new FakeCredentialStore();
-        var provider = new ClaudeProvider(commandRunner, cookies, settings, credentials, new HttpClient(new StubHttpMessageHandler(_ => throw new InvalidOperationException())));
+        var provider = new ClaudeProvider(commandRunner, cookies, settings, credentials, new FakeEnvironmentService(), new HttpClient(new StubHttpMessageHandler(_ => throw new InvalidOperationException())));
 
         var status = await provider.FetchStatusAsync(CancellationToken.None);
 
@@ -103,7 +103,7 @@ public class ClaudeProviderTests
             return Json("[{\"uuid\":\"org_api\",\"name\":\"API\",\"capabilities\":[\"api\"]},{\"uuid\":\"org_chat\",\"name\":\"Chat\",\"capabilities\":[\"chat\"]}]");
         }));
 
-        var provider = new ClaudeProvider(commandRunner, cookies, settings, credentials, client);
+        var provider = new ClaudeProvider(commandRunner, cookies, settings, credentials, new FakeEnvironmentService(), client);
 
         var status = await provider.FetchStatusAsync(CancellationToken.None);
 

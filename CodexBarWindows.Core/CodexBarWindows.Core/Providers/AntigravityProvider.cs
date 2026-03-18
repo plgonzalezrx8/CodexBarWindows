@@ -27,6 +27,7 @@ public class AntigravityProvider : IProviderProbe
 
     private const string GetUserStatusPath   = "/exa.language_server_pb.LanguageServerService/GetUserStatus";
     private const string GetModelConfigPath   = "/exa.language_server_pb.LanguageServerService/GetCommandModelConfigs";
+    private const string UnleashPath = "/exa.language_server_pb.LanguageServerService/GetUnleashData";
     private static readonly string[] ProcessNames = ["language_server_windows", "language_server"];
 
     public string ProviderId => "antigravity";
@@ -85,60 +86,134 @@ public class AntigravityProvider : IProviderProbe
 
     // ── Process Detection (Windows-specific) ────────────────────────
 
-    private record ProcessInfo(int Port, string CsrfToken);
+    internal record ProcessInfo(int Port, string CsrfToken);
 
     private async Task<ProcessInfo?> DetectProcessInfo(CancellationToken ct)
     {
-        // Use PowerShell Get-CimInstance to list processes with command lines
+        // Step 1: Find Antigravity language server process — get PID + CommandLine
         var result = await _commandRunner.ExecuteCommandAsync(
             "powershell.exe",
-            "-NoProfile -Command \"Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'language_server' } | Select-Object ProcessId, CommandLine | Format-List\"",
+            "-NoProfile -Command \"Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*language_server*' } | ForEach-Object { \"$($_.ProcessId)|$($_.CommandLine)\" }\"",
             timeoutMilliseconds: 8000,
             cancellationToken: ct);
 
         if (result.ExitCode != 0 || string.IsNullOrWhiteSpace(result.Output))
             return null;
 
-        // Parse the output for CSRF token and port
-        var lines = result.Output.Split('\n');
-        string? commandLine = null;
-
-        foreach (var line in lines)
+        foreach (var line in result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            var trimmed = line.Trim();
-            if (trimmed.StartsWith("CommandLine", StringComparison.OrdinalIgnoreCase))
-            {
-                var colonIdx = trimmed.IndexOf(':');
-                if (colonIdx > 0)
-                    commandLine = trimmed[(colonIdx + 1)..].Trim();
-            }
+            var sepIndex = line.IndexOf('|');
+            if (sepIndex <= 0) continue;
+
+            var pidStr = line[..sepIndex].Trim();
+            var commandLine = line[(sepIndex + 1)..].Trim();
+
+            if (!int.TryParse(pidStr, out var pid)) continue;
+
+            var parsed = TryParseCommandLine(commandLine);
+            if (parsed == null) continue;
+
+            // Step 2: If we already have a port from command line, use it
+            if (parsed.Port > 0)
+                return parsed;
+
+            // Step 3: Discover listening ports via Get-NetTCPConnection (like macOS lsof)
+            var port = await DiscoverWorkingPort(pid, parsed.CsrfToken, ct);
+            if (port > 0)
+                return new ProcessInfo(port, parsed.CsrfToken);
         }
 
-        if (string.IsNullOrEmpty(commandLine))
-            return null;
+        return null;
+    }
 
-        // Check it's actually an Antigravity process
+    private async Task<int> DiscoverWorkingPort(int pid, string csrfToken, CancellationToken ct)
+    {
+        var result = await _commandRunner.ExecuteCommandAsync(
+            "powershell.exe",
+            $"-NoProfile -Command \"Get-NetTCPConnection -OwningProcess {pid} -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LocalPort\"",
+            timeoutMilliseconds: 5000,
+            cancellationToken: ct);
+
+        if (result.ExitCode != 0 || string.IsNullOrWhiteSpace(result.Output))
+            return 0;
+
+        var ports = result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(p => int.TryParse(p.Trim(), out var port) ? port : 0)
+            .Where(p => p > 0)
+            .OrderBy(p => p)
+            .ToList();
+
+        // Test each port to find the working API port
+        foreach (var port in ports)
+        {
+            if (await TestPort(port, csrfToken, ct))
+                return port;
+        }
+
+        return 0;
+    }
+
+    private async Task<bool> TestPort(int port, string csrfToken, CancellationToken ct)
+    {
+        foreach (var scheme in new[] { "https", "http" })
+        {
+            try
+            {
+                var url = $"{scheme}://127.0.0.1:{port}{UnleashPath}";
+                using var request = new HttpRequestMessage(HttpMethod.Post, url);
+                request.Content = new StringContent(
+                    JsonSerializer.Serialize(new { apiKeyRequired = true }),
+                    Encoding.UTF8, "application/json");
+                request.Headers.Add("Connect-Protocol-Version", "1");
+                request.Headers.Add("X-Codeium-Csrf-Token", csrfToken);
+
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                cts.CancelAfter(3000);
+                using var response = await _apiClient.SendAsync(request, cts.Token);
+                return response.IsSuccessStatusCode;
+            }
+            catch { /* Try next scheme/port */ }
+        }
+        return false;
+    }
+
+    internal static ProcessInfo? TryParseCommandLine(string commandLine)
+    {
         var lowerCmd = commandLine.ToLowerInvariant();
-        if (!lowerCmd.Contains("antigravity") && !ProcessNames.Any(n => lowerCmd.Contains(n)))
+
+        // Must contain a known process name
+        var hasProcessName = ProcessNames.Any(n => lowerCmd.Contains(n));
+        if (!hasProcessName)
             return null;
 
-        // Extract CSRF token
+        // Must be an Antigravity process (not Windsurf or generic Codeium)
+        if (!IsAntigravityProcess(lowerCmd))
+            return null;
+
+        // Extract CSRF token (required)
         var csrfToken = ExtractFlag("--csrf_token", commandLine);
         if (string.IsNullOrEmpty(csrfToken))
             return null;
 
-        // Extract API port (try --api_server_port first, then common ports)
-        var portStr = ExtractFlag("--api_server_port", commandLine)
-                   ?? ExtractFlag("--extension_server_port", commandLine);
+        // Try to extract API port (may not exist with --random_port)
+        var portStr = ExtractFlag("--api_server_port", commandLine);
+        int.TryParse(portStr, out var port);
 
-        if (int.TryParse(portStr, out var port))
-            return new ProcessInfo(port, csrfToken);
-
-        // Try netstat to find listening ports for the process
-        return null;
+        return new ProcessInfo(port, csrfToken);
     }
 
-    private static string? ExtractFlag(string flag, string commandLine)
+    internal static bool IsAntigravityProcess(string lowerCommandLine)
+    {
+        // Match: --app_data_dir antigravity
+        if (lowerCommandLine.Contains("--app_data_dir") && lowerCommandLine.Contains("antigravity"))
+            return true;
+        // Match: path containing \antigravity\ or /antigravity/
+        if (lowerCommandLine.Contains("\\antigravity\\") || lowerCommandLine.Contains("/antigravity/"))
+            return true;
+        return false;
+    }
+
+    internal static string? ExtractFlag(string flag, string commandLine)
     {
         var pattern = $@"{Regex.Escape(flag)}[=\s]+(\S+)";
         var match = Regex.Match(commandLine, pattern, RegexOptions.IgnoreCase);

@@ -14,6 +14,13 @@ public class RefreshCoordinator
     public RefreshCoordinator(SettingsService settingsService)
     {
         _settingsService = settingsService;
+        _settingsService.SettingsChanged += ResetFailureTracking;
+    }
+
+    public void ResetFailureTracking()
+    {
+        _consecutiveFailures.Clear();
+        _skipCycles.Clear();
     }
 
     public async Task<RefreshResult> RefreshAsync(IEnumerable<IProviderProbe> providers, CancellationToken cancellationToken)

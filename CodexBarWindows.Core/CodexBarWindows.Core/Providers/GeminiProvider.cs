@@ -25,6 +25,7 @@ public class GeminiProvider : IProviderProbe
     private readonly HttpClient _httpClient;
 
     private const string QuotaEndpoint = "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota";
+    private const string LoadCodeAssistEndpoint = "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist";
     private const string TokenRefreshEndpoint = "https://oauth2.googleapis.com/token";
     private const string CredentialsRelPath = @".gemini\oauth_creds.json";
     private const string SettingsRelPath = @".gemini\settings.json";
@@ -75,10 +76,18 @@ public class GeminiProvider : IProviderProbe
             }
         }
 
+        // Discover project ID via loadCodeAssist (needed for accurate quota)
+        string? projectId = null;
+        try
+        {
+            projectId = await DiscoverProjectId(accessToken, cancellationToken);
+        }
+        catch { /* Best effort — quota fetch may still work without it */ }
+
         // Fetch quota
         try
         {
-            return await FetchQuota(accessToken, creds.IdToken, cancellationToken);
+            return await FetchQuota(accessToken, creds.IdToken, projectId, cancellationToken);
         }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
         {
@@ -93,11 +102,15 @@ public class GeminiProvider : IProviderProbe
     // ── Quota Fetch ─────────────────────────────────────────────────
 
     private async Task<ProviderUsageStatus> FetchQuota(
-        string accessToken, string? idToken, CancellationToken ct)
+        string accessToken, string? idToken, string? projectId, CancellationToken ct)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, QuotaEndpoint);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        request.Content = new StringContent("{}", Encoding.UTF8, "application/json");
+
+        var requestBody = projectId != null
+            ? $"{{\"project\": \"{projectId}\"}}"
+            : "{}";
+        request.Content = new StringContent(requestBody, Encoding.UTF8, "application/json");
 
         using var response = await _httpClient.SendAsync(request, ct);
         response.EnsureSuccessStatusCode();
@@ -161,6 +174,50 @@ public class GeminiProvider : IProviderProbe
             IsError = false,
             TooltipText = string.Join("\n", tooltipParts)
         };
+    }
+
+    // ── Project ID Discovery ────────────────────────────────────────
+
+    private async Task<string?> DiscoverProjectId(string accessToken, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, LoadCodeAssistEndpoint);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        request.Content = new StringContent(
+            "{\"metadata\":{\"ideType\":\"GEMINI_CLI\",\"pluginType\":\"GEMINI\"}}",
+            Encoding.UTF8, "application/json");
+
+        using var response = await _httpClient.SendAsync(request, ct);
+        if (!response.IsSuccessStatusCode)
+            return null;
+
+        var json = await response.Content.ReadAsStringAsync(ct);
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        // Try cloudaicompanionProject as string
+        if (root.TryGetProperty("cloudaicompanionProject", out var projectProp))
+        {
+            if (projectProp.ValueKind == JsonValueKind.String)
+            {
+                var val = projectProp.GetString()?.Trim();
+                if (!string.IsNullOrEmpty(val)) return val;
+            }
+            else if (projectProp.ValueKind == JsonValueKind.Object)
+            {
+                if (projectProp.TryGetProperty("id", out var idProp))
+                {
+                    var val = idProp.GetString()?.Trim();
+                    if (!string.IsNullOrEmpty(val)) return val;
+                }
+                if (projectProp.TryGetProperty("projectId", out var pidProp))
+                {
+                    var val = pidProp.GetString()?.Trim();
+                    if (!string.IsNullOrEmpty(val)) return val;
+                }
+            }
+        }
+
+        return null;
     }
 
     // ── Token Refresh ───────────────────────────────────────────────
@@ -317,7 +374,6 @@ public class GeminiProvider : IProviderProbe
     private (string ClientId, string ClientSecret) FindGeminiOAuthCredentials(string homeDir)
     {
         // 1. Try reading client_id/client_secret from oauth_creds.json itself
-        //    (Gemini CLI stores them alongside the tokens)
         var credsPath = Path.Combine(homeDir, CredentialsRelPath);
         if (File.Exists(credsPath))
         {
@@ -338,22 +394,53 @@ public class GeminiProvider : IProviderProbe
             catch { /* Fall through to JS file parsing */ }
         }
 
-        // 2. Try extracting from the Gemini CLI's installed oauth2.js
+        // 2. Resolve the gemini binary to find the installation directory
+        var oauthSubPath = Path.Combine("node_modules", "@google", "gemini-cli", "node_modules",
+            "@google", "gemini-cli-core", "dist", "src", "code_assist", "oauth2.js");
+        var siblingSubPath = Path.Combine("node_modules", "@google", "gemini-cli-core",
+            "dist", "src", "code_assist", "oauth2.js");
+
+        var searchRoots = new List<string>();
+
+        // 2a. Resolve the gemini binary by searching PATH (covers nvm, volta, fnm, etc.)
+        var pathValue = Environment.GetEnvironmentVariable("PATH") ?? "";
+        var extensions = new[] { ".ps1", ".cmd", ".bat", ".exe", "" };
+        foreach (var dir in pathValue.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            foreach (var ext in extensions)
+            {
+                var candidate = Path.Combine(dir.Trim(), $"gemini{ext}");
+                if (File.Exists(candidate))
+                {
+                    searchRoots.Add(dir.Trim());
+                    goto doneSearch;
+                }
+            }
+        }
+        doneSearch:
+
+        // 2b. Well-known static installation directories
         var appData = _environmentService.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         var localAppData = _environmentService.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        searchRoots.Add(Path.Combine(appData, "npm"));
+        searchRoots.Add(Path.Combine(localAppData, "bun"));
 
-        var searchPaths = new[]
+        foreach (var root in searchRoots.Where(d => !string.IsNullOrEmpty(d)))
         {
-            Path.Combine(appData, @"npm\node_modules\@google\gemini-cli\node_modules\@google\gemini-cli-core\dist\src\code_assist\oauth2.js"),
-            Path.Combine(localAppData, @"bun\node_modules\@google\gemini-cli\node_modules\@google\gemini-cli-core\dist\src\code_assist\oauth2.js"),
-        };
-
-        foreach (var path in searchPaths)
-        {
-            if (!File.Exists(path)) continue;
-            var content = File.ReadAllText(path);
-            var result = ParseOAuthFromJs(content);
-            if (result.HasValue) return result.Value;
+            var nested = Path.Combine(root, oauthSubPath);
+            if (File.Exists(nested))
+            {
+                var content = File.ReadAllText(nested);
+                var res = ParseOAuthFromJs(content);
+                if (res.HasValue) return res.Value;
+            }
+            var sibling = Path.Combine(root, siblingSubPath);
+            if (File.Exists(sibling))
+            {
+                var content = File.ReadAllText(sibling);
+                var res = ParseOAuthFromJs(content);
+                if (res.HasValue) return res.Value;
+            }
         }
 
         throw new Exception("Could not find Gemini OAuth client credentials. Ensure the Gemini CLI is installed and you have logged in with `gemini`.");
