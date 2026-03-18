@@ -135,45 +135,72 @@ public class GeminiProvider : IProviderProbe
             }
         }
 
-        // Find the lowest per-model quota for icon display
-        double? lowestRemaining = null;
-        string? lowestModelId = null;
+        // Categorize into pro / flash / flash-lite (matching macOS reference)
+        double proUsed = 0, flashUsed = 0, flashLiteUsed = 0;
+        string? proReset = null, flashReset = null, flashLiteReset = null;
+        bool hasPro = false, hasFlash = false, hasFlashLite = false;
 
-        // Categorize into pro/flash/flash-lite
-        double proUsed = 0, flashUsed = 0;
-        foreach (var (modelId, (fraction, _)) in modelQuotas)
+        foreach (var (modelId, (fraction, resetTime)) in modelQuotas)
         {
             var lower = modelId.ToLowerInvariant();
             var usedPct = (1 - fraction) * 100;
 
-            if (lower.Contains("pro")) proUsed = Math.Max(proUsed, usedPct);
-            else if (lower.Contains("flash")) flashUsed = Math.Max(flashUsed, usedPct);
-
-            if (!lowestRemaining.HasValue || fraction < lowestRemaining.Value)
+            if (lower.Contains("pro"))
             {
-                lowestRemaining = fraction;
-                lowestModelId = modelId;
+                hasPro = true;
+                if (usedPct > proUsed) { proUsed = usedPct; proReset = resetTime; }
+            }
+            else if (lower.Contains("flash-lite") || lower.Contains("flash_lite"))
+            {
+                hasFlashLite = true;
+                if (usedPct > flashLiteUsed) { flashLiteUsed = usedPct; flashLiteReset = resetTime; }
+            }
+            else if (lower.Contains("flash"))
+            {
+                hasFlash = true;
+                if (usedPct > flashUsed) { flashUsed = usedPct; flashReset = resetTime; }
             }
         }
 
         // Extract email from JWT id_token
         var email = ExtractEmailFromJwt(idToken);
 
+        // Build tooltip with per-tier usage (always show tiers that have models)
         var tooltipParts = new List<string> { "Gemini" };
-        if (proUsed > 0) tooltipParts.Add($"Pro: {proUsed:F1}% used");
-        if (flashUsed > 0) tooltipParts.Add($"Flash: {flashUsed:F1}% used");
         tooltipParts.Add($"Models tracked: {modelQuotas.Count}");
+        if (hasPro) tooltipParts.Add($"Pro: {proUsed:F1}% used{FormatReset(proReset)}");
+        if (hasFlash) tooltipParts.Add($"Flash: {flashUsed:F1}% used{FormatReset(flashReset)}");
+        if (hasFlashLite) tooltipParts.Add($"Flash Lite: {flashLiteUsed:F1}% used{FormatReset(flashLiteReset)}");
         if (email != null) tooltipParts.Add($"Account: {email}");
 
+        // Use Pro usage for session bar, Flash for weekly bar (highest usage tier for icon)
         return new ProviderUsageStatus
         {
             ProviderId = "gemini",
             ProviderName = "Gemini",
             SessionProgress = proUsed / 100.0,
-            WeeklyProgress = flashUsed / 100.0,
+            WeeklyProgress = hasFlash ? flashUsed / 100.0 : (hasFlashLite ? flashLiteUsed / 100.0 : 0),
             IsError = false,
             TooltipText = string.Join("\n", tooltipParts)
         };
+    }
+
+    private static string FormatReset(string? resetTime)
+    {
+        if (string.IsNullOrEmpty(resetTime)) return "";
+        try
+        {
+            if (DateTime.TryParse(resetTime, null, System.Globalization.DateTimeStyles.RoundtripKind, out var resetDate))
+            {
+                var remaining = resetDate - DateTime.UtcNow;
+                if (remaining.TotalMinutes <= 0) return " (resets soon)";
+                if (remaining.TotalHours >= 1)
+                    return $" (resets in {(int)remaining.TotalHours}h {remaining.Minutes}m)";
+                return $" (resets in {remaining.Minutes}m)";
+            }
+        }
+        catch { /* best effort */ }
+        return "";
     }
 
     // ── Project ID Discovery ────────────────────────────────────────
